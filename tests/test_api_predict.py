@@ -77,3 +77,37 @@ def test_health_and_model_info():
     assert "forecast_quality" in operational_prediction
     assert "source_compatibility" in operational_prediction
     assert "forecast_acceptance" in operational_prediction
+
+
+def test_operational_mutation_endpoints_can_require_api_key(monkeypatch):
+    monkeypatch.setenv("OPERATIONAL_API_KEY", "secret")
+    client = TestClient(app)
+
+    rejected = client.post(
+        "/operational-cycle",
+        params={
+            "airport": "EDDM",
+            "target_date": "2026-05-29",
+            "issue_time": "2026-05-28T20:30:00Z",
+            "auto_refresh": False,
+            "log": False,
+            "update_reports": False,
+            "notify": False,
+        },
+    )
+    assert rejected.status_code == 401
+
+    accepted = client.post(
+        "/operational-cycle",
+        params={
+            "airport": "EDDM",
+            "target_date": "2026-05-29",
+            "issue_time": "2026-05-28T20:30:00Z",
+            "auto_refresh": False,
+            "log": False,
+            "update_reports": False,
+            "notify": False,
+        },
+        headers={"X-API-Key": "secret"},
+    )
+    assert accepted.status_code == 200

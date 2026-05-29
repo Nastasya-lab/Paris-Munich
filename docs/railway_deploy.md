@@ -30,6 +30,7 @@ HOST=0.0.0.0
 WEATHER_TMAX_ENABLE_TELEGRAM=1
 TELEGRAM_BOT_TOKEN=<set in Railway Variables>
 TELEGRAM_CHAT_ID=<set in Railway Variables>
+OPERATIONAL_API_KEY=<random secret for cron callers>
 ```
 
 Railway provides `PORT` automatically.
@@ -46,12 +47,14 @@ GET /operational-monitoring
 
 ## Cron service: operational forecast
 
+Recommended Railway setup: keep persistent state only on the `Munich` API service Volume. Cron services should call the API instead of writing their own local `data/`.
+
 Create a Railway cron service using the same repo/image.
 
 Command:
 
 ```bash
-python scripts/railway_bootstrap.py && python scripts/29_daily_operational_run.py --airport EDDM --issue-time now --require-ok
+python scripts/33_call_api_job.py forecast
 ```
 
 Recommended cron schedules in UTC:
@@ -70,7 +73,7 @@ These issue hours are inside the MVP training schedule. You can also add `0 0 * 
 Command:
 
 ```bash
-python scripts/railway_bootstrap.py && python scripts/30_daily_outcome_update.py --fetch
+python scripts/33_call_api_job.py outcome
 ```
 
 Recommended schedule:
@@ -116,6 +119,13 @@ Recommended schedule:
 ```
 
 This exits non-zero if the forward system is not launch-ready.
+
+Cron service variables:
+
+```bash
+MUNICH_API_BASE_URL=https://<your-munich-domain>
+OPERATIONAL_API_KEY=<same value as API service>
+```
 
 ## Manual Railway checks
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import FastAPI
+import os
+
+from fastapi import FastAPI, Header, HTTPException
 
 from weather_tmax_bot.bot.forecast_log import log_forecast
 from weather_tmax_bot.bot.lineage import build_data_lineage, model_info
@@ -11,6 +13,11 @@ from weather_tmax_bot.evaluation.monitoring import build_monitoring_summary
 from weather_tmax_bot.evaluation.operational_api import operational_monitoring_payload
 from weather_tmax_bot.models.registry_health import registry_health
 from weather_tmax_bot.models.predict import predict_best_available
+from weather_tmax_bot.notifications.telegram import (
+    format_operational_cycle_message,
+    format_outcome_update_message,
+    notify_if_configured,
+)
 from weather_tmax_bot.operations.acceptance import evaluate_forecast_acceptance
 from weather_tmax_bot.operations.refresh import refresh_operational_data
 from weather_tmax_bot.operations.predict_run import run_prediction_with_optional_refresh
@@ -22,6 +29,12 @@ from weather_tmax_bot.temporal.freshness_gate import evaluate_freshness_gate
 from weather_tmax_bot.utils.time import parse_issue_time
 
 app = FastAPI(title="Weather Tmax Bot")
+
+
+def _require_api_key(x_api_key: str | None = Header(default=None), api_key: str | None = None) -> None:
+    expected = os.getenv("OPERATIONAL_API_KEY")
+    if expected and x_api_key != expected and api_key != expected:
+        raise HTTPException(status_code=401, detail="invalid operational api key")
 
 
 @app.get("/predict")
@@ -78,10 +91,14 @@ def operational_cycle(
     refresh_nwp: bool = True,
     log: bool = True,
     update_reports: bool = True,
+    notify: bool = True,
+    api_key: str | None = None,
+    x_api_key: str | None = Header(default=None),
 ):
+    _require_api_key(x_api_key=x_api_key, api_key=api_key)
     issue = parse_issue_time(issue_time)
     target = target_date or issue.date()
-    return run_operational_cycle(
+    summary = run_operational_cycle(
         airport=airport,
         target_date_local=target,
         issue_time_utc=issue,
@@ -92,6 +109,9 @@ def operational_cycle(
         update_reports=update_reports,
         mode="api_operational_cycle",
     )
+    if notify:
+        summary["telegram_notification"] = notify_if_configured(format_operational_cycle_message(summary))
+    return summary
 
 
 @app.post("/predict-operational")
@@ -188,10 +208,17 @@ def post_pending_truth_cron(
     as_of_date: date | None = None,
     min_lag_days: int = 1,
     update_reports: bool = True,
+    notify: bool = True,
+    api_key: str | None = None,
+    x_api_key: str | None = Header(default=None),
 ):
-    return run_pending_truth_cron(
+    _require_api_key(x_api_key=x_api_key, api_key=api_key)
+    result = run_pending_truth_cron(
         fetch=fetch,
         as_of_date=as_of_date,
         min_lag_days=min_lag_days,
         update_reports=update_reports,
     )
+    if notify:
+        result["telegram_notification"] = notify_if_configured(format_outcome_update_message(result))
+    return result
