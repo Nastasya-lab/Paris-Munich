@@ -1,0 +1,81 @@
+{
+  "airport": "EDDM",
+  "model_version": "quantile_mvp_issue_features_20260529",
+  "created_at_utc": "2026-05-29T09:34:18.454036+00:00",
+  "dataset_path": "data/processed/training_dataset.parquet",
+  "rows": 15309,
+  "leakage_passed": true,
+  "quality_gates": {
+    "min_rows": true,
+    "leakage_passed": true,
+    "finite_nll": true,
+    "coverage_80_reasonable": true,
+    "coverage_90_reasonable": true,
+    "crps_reasonable": true
+  },
+  "promoted": true,
+  "metrics": {
+    "rows": 360,
+    "test_start": "2025-01-01",
+    "issue_hour_utc": 6,
+    "raw": {
+      "mae_median": 2.3980555555555556,
+      "rmse_mean": 3.0336994352416617,
+      "mean_nll": 2.8873489590036416,
+      "mean_crps": 0.9371302973804094,
+      "coverage_50": 0.4305555555555556,
+      "coverage_80": 0.7111111111111111,
+      "coverage_90": 0.8111111111111111,
+      "brier_ge_20": 0.06615289238978049,
+      "brier_ge_25": 0.04163862329596817,
+      "brier_ge_30": 0.016504124439312172
+    },
+    "calibrated_spread": {
+      "mae_median": 2.373611111111111,
+      "rmse_mean": 3.0336994352416617,
+      "mean_nll": 2.4408623805901666,
+      "mean_crps": 0.9327176518777618,
+      "coverage_50": 0.5055555555555555,
+      "coverage_80": 0.8,
+      "coverage_90": 0.9527777777777777,
+      "brier_ge_20": 0.06499725114652623,
+      "brier_ge_25": 0.04132369902442865,
+      "brier_ge_30": 0.01526253078400117
+    },
+    "calibrated_isotonic_cdf": {
+      "mae_median": 2.3875,
+      "rmse_mean": 3.0246899556484923,
+      "mean_nll": 4.64181096929569,
+      "mean_crps": 0.9389446018935313,
+      "coverage_50": 0.46111111111111114,
+      "coverage_80": 0.7277777777777777,
+      "coverage_90": 0.8527777777777777,
+      "brier_ge_20": 0.06505721197692481,
+      "brier_ge_25": 0.04219713437921077,
+      "brier_ge_30": 0.016278574232285604
+    },
+    "calibrator_sigma_bins": 1.25
+  },
+  "leakage_report": [
+    {
+      "check": "max_metar_knowledge_time_utc",
+      "violations": 0
+    },
+    {
+      "check": "max_nwp_knowledge_time_utc",
+      "violations": 0
+    },
+    {
+      "check": "latest_metar_time_utc",
+      "violations": 0
+    },
+    {
+      "check": "forbidden_target_feature_columns",
+      "violations": 0
+    },
+    {
+      "check": "rows",
+      "violations": 15309
+    }
+  ]
+}

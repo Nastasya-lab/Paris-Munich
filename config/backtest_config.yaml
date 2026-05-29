@@ -1,0 +1,7 @@
+backtest:
+  issue_hours_utc: [0, 3, 6, 9, 12, 15, 18]
+  split: expanding
+  min_train_days: 730
+  validation_days: 365
+  test_days: 365
+  metrics: [mae_median, rmse_mean, bias, crps, nll_integer_bin, brier_ge_20, brier_ge_25, brier_ge_30, calibration_error, interval_coverage]

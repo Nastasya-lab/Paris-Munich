@@ -1,0 +1,102 @@
+{
+  "airport": "EDDM",
+  "target_date_local": "2026-05-29",
+  "issue_time_utc": "2026-05-29T15:00:00+00:00",
+  "forecast_id": "39daccec-e667-4727-b5a4-2940bfcd49dd",
+  "model_version": "quantile_mvp_issue_features_20260529",
+  "forecast_quality": {
+    "status": "ok",
+    "reasons": [],
+    "cautions": [
+      "calibration is preliminary",
+      "known compatible runtime source differs from training source",
+      "minor live feature extrapolation"
+    ],
+    "recommendation": "Use forecast with monitoring; runtime source is known-compatible but should be tracked separately."
+  },
+  "forecast_acceptance": {
+    "accepted": true,
+    "checks": {
+      "quality_status_ok": true,
+      "has_no_hard_reasons": true,
+      "probabilities_sum_to_one": true,
+      "has_probability_bins": true
+    },
+    "blocking_reasons": [],
+    "cautions": [
+      "calibration is preliminary",
+      "known compatible runtime source differs from training source",
+      "minor live feature extrapolation"
+    ]
+  },
+  "accepted": true,
+  "warnings": [
+    "Extrapolation warning: 1 feature(s) outside training range; examples: observed_min_so_far_from_metar.",
+    "Validation-fitted spread calibration applied.",
+    "Quantile MVP model used; calibration layer is still preliminary.",
+    "Source compatibility note: METAR runtime source awc.metar.live.EDDM differs from training source iem.metar.archive.EDDM but is marked known-compatible; monitor performance.",
+    "Source compatibility note: TAF runtime source awc.taf.live.EDDM differs from training source iem.taf.archive.EDDM but is marked known-compatible; monitor performance.",
+    "forecast logged as 39daccec-e667-4727-b5a4-2940bfcd49dd"
+  ],
+  "refresh_summary": {
+    "airport": "EDDM",
+    "target_date_local": "2026-05-29",
+    "sources": {
+      "awc": {
+        "metar_rows_fetched": 1,
+        "taf_rows_fetched": 1,
+        "metar_archive_rows": 2,
+        "taf_archive_rows": 2
+      },
+      "open_meteo_nwp": {
+        "rows_fetched": 1,
+        "archive_rows": 3
+      }
+    },
+    "freshness_gate": {
+      "passed": true,
+      "failures": [],
+      "freshness": {
+        "statuses": {
+          "metar": {
+            "state": "fresh",
+            "latest_time_utc": "2026-05-29T14:50:00+00:00",
+            "age_hours": 0.2241359788888889,
+            "max_age_hours": 2.0,
+            "warning": null
+          },
+          "taf": {
+            "state": "fresh",
+            "latest_time_utc": "2026-05-29T11:00:00+00:00",
+            "age_hours": 4.0574693122222225,
+            "max_age_hours": 12.0,
+            "warning": null
+          },
+          "nwp": {
+            "state": "fresh",
+            "latest_time_utc": "2026-05-29T15:03:26.275744+00:00",
+            "age_hours": 0.00017049444444444445,
+            "max_age_hours": 18.0,
+            "warning": null
+          }
+        },
+        "warnings": []
+      }
+    }
+  },
+  "prediction_report_path": "data\\reports\\latest_operational_prediction.json",
+  "report_summary": {
+    "forecast_outcome_status_rows": 13,
+    "operational_tables": {
+      "by_model": 0,
+      "source_mismatch": 0,
+      "availability": 0,
+      "acceptance": 0,
+      "forecast_inventory": 3,
+      "pending_forecasts": 4
+    },
+    "monitoring_report_updated": true,
+    "first_analysis_updated": true
+  },
+  "recommendation": "forecast_accepted_for_operational_use"
+}

@@ -1,0 +1,49 @@
+{
+  "airport": "EDDM",
+  "target_date_local": "2026-05-29",
+  "sources": {},
+  "freshness_gate": {
+    "passed": false,
+    "failures": [
+      {
+        "source": "metar",
+        "state": "stale",
+        "warning": "METAR data is stale: age 9.7h exceeds 2.0h."
+      },
+      {
+        "source": "taf",
+        "state": "stale",
+        "warning": "TAF data is stale: age 13.0h exceeds 12.0h."
+      }
+    ],
+    "freshness": {
+      "statuses": {
+        "metar": {
+          "state": "stale",
+          "latest_time_utc": "2026-05-28T20:20:00+00:00",
+          "age_hours": 9.682575057777779,
+          "max_age_hours": 2.0,
+          "warning": "METAR data is stale: age 9.7h exceeds 2.0h."
+        },
+        "taf": {
+          "state": "stale",
+          "latest_time_utc": "2026-05-28T17:00:00+00:00",
+          "age_hours": 13.015908391111111,
+          "max_age_hours": 12.0,
+          "warning": "TAF data is stale: age 13.0h exceeds 12.0h."
+        },
+        "nwp": {
+          "state": "fresh",
+          "latest_time_utc": "2026-05-28T14:17:08.077194+00:00",
+          "age_hours": 15.730331392777776,
+          "max_age_hours": 18.0,
+          "warning": null
+        }
+      },
+      "warnings": [
+        "METAR data is stale: age 9.7h exceeds 2.0h.",
+        "TAF data is stale: age 13.0h exceeds 12.0h."
+      ]
+    }
+  }
+}

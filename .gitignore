@@ -1,0 +1,16 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+.env
+.venv/
+venv/
+
+data/cache/
+data/logs/*.jsonl
+data/raw/dwd/*.zip
+data/reports/test_*.json
+data/reports/live_operational_*.json
+
+*.tmp
+*.log

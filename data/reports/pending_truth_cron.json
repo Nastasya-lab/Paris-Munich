@@ -1,0 +1,32 @@
+{
+  "status": {
+    "pending_rows": 9,
+    "ready_rows": 0,
+    "dates_to_refresh": [],
+    "as_of_date": "2026-05-29",
+    "cutoff_date": "2026-05-28",
+    "min_lag_days": 1,
+    "outcome_status_counts": {
+      "pending_truth": 9
+    },
+    "action_required": false,
+    "recommendation": "wait_for_truth_lag_or_target_completion"
+  },
+  "status_before": {
+    "pending_rows": 9,
+    "ready_rows": 0,
+    "dates_to_refresh": [],
+    "as_of_date": "2026-05-29",
+    "cutoff_date": "2026-05-28",
+    "min_lag_days": 1,
+    "outcome_status_counts": {
+      "pending_truth": 9
+    },
+    "action_required": false,
+    "recommendation": "wait_for_truth_lag_or_target_completion"
+  },
+  "refresh_summary": null,
+  "ran_refresh": false,
+  "reports_updated": false,
+  "recommendation": "pending_forecasts_not_ready_for_truth_refresh"
+}

@@ -1,0 +1,14 @@
+{
+  "airport": "EDDM",
+  "station_id": "01262",
+  "plan": {
+    "as_of_date": "2026-05-29",
+    "min_lag_days": 1,
+    "cutoff_date": "2026-05-28",
+    "dates_to_refresh": [],
+    "pending_rows": 9,
+    "ready_rows": 0
+  },
+  "fetched_rows": 0,
+  "target_rows": null
+}

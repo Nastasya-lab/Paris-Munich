@@ -1,0 +1,14 @@
+{
+  "forecast_monitoring_rows": 0,
+  "forecast_outcome_status_rows": 12,
+  "operational_tables": {
+    "by_model": 0,
+    "source_mismatch": 0,
+    "availability": 0,
+    "acceptance": 0,
+    "forecast_inventory": 3,
+    "pending_forecasts": 4
+  },
+  "outcome_analysis_status": "pending",
+  "outcome_analysis_rows": 0
+}

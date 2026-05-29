@@ -1,0 +1,12 @@
+{
+  "model_name": "discrete_spread_calibrator",
+  "model_version": "quantile_mvp.calibrator",
+  "training_period": "validation_holdout_2025",
+  "validation_period": "2025",
+  "feature_set_version": "mvp.v1",
+  "source_registry_version": "2026-05-28.v1",
+  "data_snapshot_hash": "manual",
+  "calibration_version": "spread_sigma_1.25",
+  "git_commit": null,
+  "created_at_utc": "2026-05-28T14:28:46.911595+00:00"
+}

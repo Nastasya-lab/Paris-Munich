@@ -1,0 +1,14 @@
+{
+  "status": "pending",
+  "reason": "forecast_monitoring.parquet not found",
+  "rows": 0,
+  "overall": {},
+  "by_model": [],
+  "by_quality": [],
+  "by_acceptance": [],
+  "by_source_mismatch": [],
+  "by_metar_compatibility": [],
+  "by_taf_compatibility": [],
+  "worst_by_crps": [],
+  "best_by_crps": []
+}

@@ -1,0 +1,18 @@
+airports:
+  EDDM:
+    name: Munich Airport
+    timezone: Europe/Berlin
+    latitude: 48.3538
+    longitude: 11.7861
+    elevation_m: 453
+    truth_station:
+      provider: DWD
+      station_id: '01262'
+      station_name: Muenchen-Flughafen
+      latitude: 48.3477
+      longitude: 11.8134
+      elevation_m: 446.0
+      distance_km: 2.13
+      date_from: '1992-05-19'
+      date_to: '2026-05-28'
+      source_id: dwd.10min.air_temperature.01262

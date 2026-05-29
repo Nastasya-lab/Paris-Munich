@@ -1,0 +1,167 @@
+registry_version: "2026-05-28.v1"
+sources:
+  - source_id: dwd.10min.air_temperature.01262
+    name: DWD CDC 10-minute air temperature, Muenchen-Flughafen
+    type: truth
+    historical_availability: "DWD CDC historical and recent 10-minute observations when station files are available"
+    latency_assumption: "final CDC data may arrive after event time; operational recent files may be earlier but must carry knowledge_time"
+    update_frequency: "10 minutes / CDC archive batches"
+    license_notes: "DWD open data, check current attribution terms"
+    quality_notes: "preferred truth source for EDDM Tmax; QC flags must be respected"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: false
+    whether_allowed_for_truth_target: true
+  - source_id: dwd.hourly.air_temperature.01262
+    name: DWD CDC hourly air temperature fallback, Muenchen-Flughafen
+    type: observation
+    historical_availability: "fallback if 10-minute is unavailable or incomplete"
+    latency_assumption: "final data may be delayed"
+    update_frequency: "hourly/archive batches"
+    license_notes: "DWD open data"
+    quality_notes: "lower temporal resolution than 10-minute truth"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: false
+    whether_allowed_for_truth_target: true
+  - source_id: dwd.daily.air_temperature.01262
+    name: DWD CDC daily air temperature fallback, Muenchen-Flughafen
+    type: observation
+    historical_availability: "daily fallback"
+    latency_assumption: "final daily release after day closes"
+    update_frequency: "daily/archive batches"
+    license_notes: "DWD open data"
+    quality_notes: "target fallback only; cannot support Tmax timing"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: false
+    whether_allowed_for_truth_target: true
+  - source_id: iem.metar.archive.EDDM
+    name: IEM archived METAR for EDDM
+    type: metar
+    historical_availability: "IEM archive coverage varies by station and period"
+    latency_assumption: "knowledge_time >= observation_time plus archive latency"
+    update_frequency: "sub-hourly to hourly"
+    license_notes: "IEM terms apply"
+    quality_notes: "operational feature source; not truth target"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: awc.metar.live.EDDM
+    name: Aviation Weather Center live METAR for EDDM
+    type: metar
+    historical_availability: "live/recent, not full historical archive"
+    latency_assumption: "knowledge_time >= report receipt time"
+    update_frequency: "sub-hourly"
+    license_notes: "NOAA/AWC terms apply"
+    quality_notes: "operational feature source"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: iem.taf.archive.EDDM
+    name: IEM archived TAF for EDDM
+    type: taf
+    historical_availability: "archive coverage must be validated"
+    latency_assumption: "knowledge_time >= TAF issue time plus archive latency"
+    update_frequency: "several times daily"
+    license_notes: "IEM terms apply"
+    quality_notes: "parser must preserve issue and valid intervals"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: awc.taf.live.EDDM
+    name: Aviation Weather Center live TAF for EDDM
+    type: taf
+    historical_availability: "live/recent only"
+    latency_assumption: "knowledge_time >= issue time"
+    update_frequency: "several times daily"
+    license_notes: "NOAA/AWC terms apply"
+    quality_notes: "operational feature source"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: dwd.icon_d2.forecast_as_issued
+    name: DWD ICON-D2 forecast-as-issued archive/extract
+    type: nwp
+    historical_availability: "requires real archive or operational accumulation"
+    latency_assumption: "knowledge_time >= model availability, not run time"
+    update_frequency: "multiple daily cycles"
+    license_notes: "DWD open data terms"
+    quality_notes: "never substitute reanalysis in main backtest"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: dwd.icon_eu.forecast_as_issued
+    name: DWD ICON-EU forecast-as-issued archive/extract
+    type: nwp
+    historical_availability: "requires real archive or operational accumulation"
+    latency_assumption: "knowledge_time >= model availability"
+    update_frequency: "multiple daily cycles"
+    license_notes: "DWD open data terms"
+    quality_notes: "graceful degradation if unavailable"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: dwd.icon_global.forecast_as_issued
+    name: DWD ICON Global forecast-as-issued archive/extract
+    type: nwp
+    historical_availability: "requires real archive or operational accumulation"
+    latency_assumption: "knowledge_time >= model availability"
+    update_frequency: "multiple daily cycles"
+    license_notes: "DWD open data terms"
+    quality_notes: "coarser fallback"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: ecmwf.ifs_hres.forecast_as_issued
+    name: ECMWF IFS/HRES forecast-as-issued extract
+    type: nwp
+    historical_availability: "license/access dependent"
+    latency_assumption: "knowledge_time >= model availability"
+    update_frequency: "twice daily or as licensed"
+    license_notes: "ECMWF license required for many products"
+    quality_notes: "optional"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: open_meteo.previous_runs
+    name: Open-Meteo Previous Runs / Single Runs
+    type: nwp
+    historical_availability: "only acceptable when a concrete issued run is preserved"
+    latency_assumption: "knowledge_time >= available previous/single run metadata"
+    update_frequency: "provider dependent"
+    license_notes: "Open-Meteo terms apply"
+    quality_notes: "seamless historical weather is banned for training features"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: open_meteo.live.icon_d2
+    name: Open-Meteo live ICON-D2 forecast archived at ingest
+    type: nwp
+    historical_availability: "forward archive only from our operational ingest time"
+    latency_assumption: "knowledge_time = ingest_time unless authoritative run availability metadata is available"
+    update_frequency: "operator scheduled"
+    license_notes: "Open-Meteo terms apply"
+    quality_notes: "not used for historical backtest before archive accumulation"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: dwd.mosmix.forecast_as_issued
+    name: DWD MOSMIX issued forecasts
+    type: forecast
+    historical_availability: "only if honest issued archive exists or is accumulated"
+    latency_assumption: "knowledge_time >= file availability"
+    update_frequency: "several daily cycles"
+    license_notes: "DWD open data terms"
+    quality_notes: "good MOS baseline if archived honestly"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: mostlyright.sdk
+    name: MostlyRight SDK optional wrapper
+    type: feature
+    historical_availability: "supports AWC/IEM/GHCNh/NWS CLI and Open-Meteo forecast metadata per SDK version"
+    latency_assumption: "must be audited by internal knowledge_time rules"
+    update_frequency: "SDK/source dependent"
+    license_notes: "MIT SDK plus upstream source terms"
+    quality_notes: "optional helper, not final model architecture"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false

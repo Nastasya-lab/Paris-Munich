@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "failures": [],
+  "freshness": {
+    "statuses": {
+      "metar": {
+        "state": "fresh",
+        "latest_time_utc": "2026-05-29T14:50:00+00:00",
+        "age_hours": 0.17217702944444443,
+        "max_age_hours": 2.0,
+        "warning": null
+      },
+      "taf": {
+        "state": "fresh",
+        "latest_time_utc": "2026-05-29T11:00:00+00:00",
+        "age_hours": 4.005510362777778,
+        "max_age_hours": 12.0,
+        "warning": null
+      },
+      "nwp": {
+        "state": "fresh",
+        "latest_time_utc": "2026-05-29T14:58:09.399519+00:00",
+        "age_hours": 0.03623271861111111,
+        "max_age_hours": 18.0,
+        "warning": null
+      }
+    },
+    "warnings": []
+  }
+}

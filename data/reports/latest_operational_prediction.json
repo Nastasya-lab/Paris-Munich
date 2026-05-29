@@ -1,0 +1,182 @@
+{
+  "expected_tmax_c": 17.3095853292935,
+  "median_tmax_c": 17.0,
+  "most_likely_integer_c": 15,
+  "intervals": {
+    "50": [
+      14.0,
+      21.0
+    ],
+    "80": [
+      12.0,
+      23.0
+    ],
+    "90": [
+      12.0,
+      24.0
+    ]
+  },
+  "probabilities_by_integer_c": {
+    "6": 1.7614739659084222e-06,
+    "7": 3.7689957769089615e-05,
+    "8": 0.0004193102766563806,
+    "9": 0.0027410349249895683,
+    "10": 0.011247161528102945,
+    "11": 0.03072807165934398,
+    "12": 0.05889467455553869,
+    "13": 0.08460207208112872,
+    "14": 0.10089934413374303,
+    "15": 0.10743213038400522,
+    "16": 0.09937619007593382,
+    "17": 0.07699655740074388,
+    "18": 0.05483049008366081,
+    "19": 0.050024909091006854,
+    "20": 0.06464789387146395,
+    "21": 0.07620992541538962,
+    "22": 0.06550011194563869,
+    "23": 0.04502223205909399,
+    "24": 0.028322846548708976,
+    "25": 0.015706581380635277,
+    "26": 0.008521610726884897,
+    "27": 0.006663924403051786,
+    "28": 0.0059249468606412965,
+    "29": 0.003659565779713968,
+    "30": 0.00130588723357682,
+    "31": 0.00025493141995541876,
+    "32": 2.6673506097332218e-05,
+    "33": 1.471222558905173e-06
+  },
+  "threshold_probabilities": {
+    "ge_20": 0.32176860237341093,
+    "ge_25": 0.0420655925331157,
+    "ge_30": 0.001588963382188476,
+    "le_0": 0.0
+  },
+  "airport": "EDDM",
+  "target_date_local": "2026-05-29",
+  "issue_time_utc": "2026-05-28T20:30:00+00:00",
+  "model_version": "quantile_mvp_issue_features_20260529",
+  "forecast_id": null,
+  "warnings": [
+    "Extrapolation warning: 4 feature(s) outside training range; examples: issue_hour_utc, issue_hour_continuous_utc, issue_minutes_since_midnight_utc, lead_to_local_day_end_hours.",
+    "Validation-fitted spread calibration applied.",
+    "Quantile MVP model used; calibration layer is still preliminary.",
+    "Source compatibility note: METAR runtime source awc.metar.live.EDDM differs from training source iem.metar.archive.EDDM but is marked known-compatible; monitor performance.",
+    "Source compatibility note: TAF runtime source awc.taf.live.EDDM differs from training source iem.taf.archive.EDDM but is marked known-compatible; monitor performance."
+  ],
+  "data_lineage": {
+    "truth_source": "dwd.10min.air_temperature.01262",
+    "metar_source_id": "awc.metar.live.EDDM",
+    "metar_latest_time_utc": "2026-05-28 20:20:00+00:00",
+    "taf_source_id": "awc.taf.live.EDDM",
+    "taf_issue_time_utc": "2026-05-28 17:00:00+00:00",
+    "nwp_runs": [
+      {
+        "model_name": "open_meteo.icon_d2",
+        "source_id": "open_meteo.live.icon_d2",
+        "knowledge_time_utc": "2026-05-28 14:17:08.077194+00:00"
+      }
+    ],
+    "max_feature_knowledge_time_utc": "2026-05-28 20:25:00+00:00"
+  },
+  "data_freshness": {
+    "metar": {
+      "state": "fresh",
+      "latest_time_utc": "2026-05-28T20:20:00+00:00",
+      "age_hours": 0.16666666666666666,
+      "max_age_hours": 2.0,
+      "warning": null
+    },
+    "taf": {
+      "state": "fresh",
+      "latest_time_utc": "2026-05-28T17:00:00+00:00",
+      "age_hours": 3.5,
+      "max_age_hours": 12.0,
+      "warning": null
+    },
+    "nwp": {
+      "state": "fresh",
+      "latest_time_utc": "2026-05-28T14:17:08.077194+00:00",
+      "age_hours": 6.214423001666666,
+      "max_age_hours": 18.0,
+      "warning": null
+    }
+  },
+  "extrapolation": {
+    "extrapolated": true,
+    "severity": "severe",
+    "violations": [
+      {
+        "feature": "issue_hour_utc",
+        "value": 20.0,
+        "training_min": 0.0,
+        "training_max": 18.0
+      },
+      {
+        "feature": "issue_hour_continuous_utc",
+        "value": 20.5,
+        "training_min": 0.0,
+        "training_max": 18.0
+      },
+      {
+        "feature": "issue_minutes_since_midnight_utc",
+        "value": 1230.0,
+        "training_min": 0.0,
+        "training_max": 1080.0
+      },
+      {
+        "feature": "lead_to_local_day_end_hours",
+        "value": 25.499999999722224,
+        "training_min": 3.999999999722222,
+        "training_max": 22.999999999722224
+      }
+    ],
+    "warnings": [
+      "Extrapolation warning: 4 feature(s) outside training range; examples: issue_hour_utc, issue_hour_continuous_utc, issue_minutes_since_midnight_utc, lead_to_local_day_end_hours."
+    ]
+  },
+  "source_compatibility": {
+    "metar": {
+      "status": "known_runtime_compatible",
+      "runtime_source_id": "awc.metar.live.EDDM",
+      "training_source_id": "iem.metar.archive.EDDM",
+      "known_compatible": true
+    },
+    "taf": {
+      "status": "known_runtime_compatible",
+      "runtime_source_id": "awc.taf.live.EDDM",
+      "training_source_id": "iem.taf.archive.EDDM",
+      "known_compatible": true
+    }
+  },
+  "forecast_quality": {
+    "status": "degraded",
+    "reasons": [
+      "issue time is outside configured training schedule",
+      "live features outside training range"
+    ],
+    "cautions": [
+      "calibration is preliminary",
+      "known compatible runtime source differs from training source"
+    ],
+    "recommendation": "Prefer configured issue times 00/03/06/09/12/15/18 UTC, or retrain with this operational schedule."
+  },
+  "forecast_acceptance": {
+    "accepted": false,
+    "checks": {
+      "quality_status_ok": false,
+      "has_no_hard_reasons": false,
+      "probabilities_sum_to_one": true,
+      "has_probability_bins": true
+    },
+    "blocking_reasons": [
+      "quality_status_ok",
+      "has_no_hard_reasons"
+    ],
+    "cautions": [
+      "calibration is preliminary",
+      "known compatible runtime source differs from training source"
+    ]
+  },
+  "refresh_summary": null
+}

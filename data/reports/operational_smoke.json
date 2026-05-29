@@ -1,0 +1,64 @@
+{
+  "passed": true,
+  "checks": {
+    "registry_health_passed": true,
+    "freshness_gate_passed": true,
+    "probabilities_sum_to_one": true,
+    "prediction_has_bins": true,
+    "production_predict_ready": true,
+    "leakage_audit_passed": true
+  },
+  "airport": "EDDM",
+  "target_date_local": "2026-05-29",
+  "issue_time_utc": "2026-05-28T20:30:00+00:00",
+  "model_version": "quantile_mvp_retrain_20260529",
+  "expected_tmax_c": 13.693403069429284,
+  "median_tmax_c": 13.0,
+  "most_likely_integer_c": 12,
+  "probability_sum": 1.0,
+  "warnings": [
+    "Extrapolation warning: 1 feature(s) outside training range; examples: issue_hour_utc.",
+    "Validation-fitted spread calibration applied.",
+    "Quantile MVP model used; calibration layer is still preliminary.",
+    "Source mismatch warning: METAR runtime source is awc.metar.live.EDDM; training METAR source is iem.metar.archive.EDDM.",
+    "Source mismatch warning: TAF runtime source is awc.taf.live.EDDM; training TAF source is iem.taf.archive.EDDM."
+  ],
+  "freshness": {
+    "passed": true,
+    "failures": [],
+    "freshness": {
+      "statuses": {
+        "metar": {
+          "state": "fresh",
+          "latest_time_utc": "2026-05-28T20:20:00+00:00",
+          "age_hours": 0.16666666666666666,
+          "max_age_hours": 2.0,
+          "warning": null
+        },
+        "taf": {
+          "state": "fresh",
+          "latest_time_utc": "2026-05-28T17:00:00+00:00",
+          "age_hours": 3.5,
+          "max_age_hours": 12.0,
+          "warning": null
+        },
+        "nwp": {
+          "state": "fresh",
+          "latest_time_utc": "2026-05-28T14:17:08.077194+00:00",
+          "age_hours": 6.214423001666666,
+          "max_age_hours": 18.0,
+          "warning": null
+        }
+      },
+      "warnings": []
+    }
+  },
+  "first_analysis_readiness": {
+    "historical_backtest_ready": true,
+    "calibration_ready": true,
+    "production_predict_ready": true,
+    "leakage_audit_passed": true,
+    "operational_outcome_analysis_ready": false,
+    "freshness_gate_passed": false
+  }
+}

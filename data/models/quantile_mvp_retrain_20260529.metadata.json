@@ -1,0 +1,15 @@
+{
+  "model_name": "quantile_gradient_boosting",
+  "model_version": "quantile_mvp_retrain_20260529",
+  "training_period": [
+    "2020-01-01",
+    "2025-12-31"
+  ],
+  "validation_period": null,
+  "feature_set_version": "mvp.v1",
+  "source_registry_version": "2026-05-28.v1",
+  "data_snapshot_hash": "5dbb45fee3e08a647c92a4e10ad6173f9f79a0e1e731fdadcac8146fdba2e161",
+  "calibration_version": "quantile_mvp_retrain_20260529.calibrator",
+  "git_commit": null,
+  "created_at_utc": "2026-05-29T04:59:07.866633+00:00"
+}

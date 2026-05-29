@@ -1,0 +1,14 @@
+{
+  "ready_for_forward_ops": true,
+  "ready_for_outcome_monitoring": false,
+  "blocking_reasons": [],
+  "accepted_operational_forecasts": 2,
+  "forecast_log_rows": 12,
+  "forecast_monitoring_rows": 0,
+  "pending_truth_rows": 12,
+  "ready_truth_refresh_dates": [],
+  "registry_health_passed": true,
+  "freshness_gate_passed": true,
+  "leakage_audit_passed": true,
+  "next_action": "continue_forward_logging_until_dwd_truth_is_available"
+}

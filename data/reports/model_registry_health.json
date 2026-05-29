@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "checks": {
+    "registry_loaded": true,
+    "active_or_fallback_model_exists": true,
+    "fallback_model_exists": true,
+    "active_calibrator_optional_or_exists": true,
+    "active_version_registered": true
+  },
+  "active_model_version": "quantile_mvp_issue_features_20260529",
+  "active_calibrator_version": "quantile_mvp_issue_features_20260529.calibrator",
+  "model_path": "data\\models\\quantile_mvp_issue_features_20260529.joblib",
+  "calibrator_path": "data\\models\\quantile_mvp_issue_features_20260529.calibrator.joblib"
+}

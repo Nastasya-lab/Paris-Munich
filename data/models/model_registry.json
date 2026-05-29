@@ -1,0 +1,63 @@
+{
+  "active_model_version": "quantile_mvp_issue_features_20260529",
+  "active_calibrator_version": "quantile_mvp_issue_features_20260529.calibrator",
+  "entries": [
+    {
+      "version": "quantile_mvp_retrain_20260528",
+      "artifact_type": "model",
+      "path": "data\\models\\quantile_mvp_retrain_20260528.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_retrain_20260528.metadata.json",
+      "metrics": {}
+    },
+    {
+      "version": "quantile_mvp_retrain_20260528.calibrator",
+      "artifact_type": "calibrator",
+      "path": "data\\models\\quantile_mvp_retrain_20260528.calibrator.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_retrain_20260528.calibrator.metadata.json",
+      "metrics": {}
+    },
+    {
+      "version": "quantile_mvp_retrain_20260529",
+      "artifact_type": "model",
+      "path": "data\\models\\quantile_mvp_retrain_20260529.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_retrain_20260529.metadata.json",
+      "metrics": {}
+    },
+    {
+      "version": "quantile_mvp_retrain_20260529.calibrator",
+      "artifact_type": "calibrator",
+      "path": "data\\models\\quantile_mvp_retrain_20260529.calibrator.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_retrain_20260529.calibrator.metadata.json",
+      "metrics": {}
+    },
+    {
+      "version": "quantile_mvp_issue_features_20260529",
+      "artifact_type": "model",
+      "path": "data\\models\\quantile_mvp_issue_features_20260529.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_issue_features_20260529.metadata.json",
+      "metrics": {}
+    },
+    {
+      "version": "quantile_mvp_issue_features_20260529.calibrator",
+      "artifact_type": "calibrator",
+      "path": "data\\models\\quantile_mvp_issue_features_20260529.calibrator.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_issue_features_20260529.calibrator.metadata.json",
+      "metrics": {}
+    }
+  ],
+  "promotion": {
+    "reason": "automatic_retraining_gates_passed",
+    "metrics": {
+      "mae_median": 2.373611111111111,
+      "rmse_mean": 3.0336994352416617,
+      "mean_nll": 2.4408623805901666,
+      "mean_crps": 0.9327176518777618,
+      "coverage_50": 0.5055555555555555,
+      "coverage_80": 0.8,
+      "coverage_90": 0.9527777777777777,
+      "brier_ge_20": 0.06499725114652623,
+      "brier_ge_25": 0.04132369902442865,
+      "brier_ge_30": 0.01526253078400117
+    }
+  }
+}
