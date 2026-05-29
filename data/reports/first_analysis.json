@@ -152,21 +152,21 @@
       "metar": {
         "state": "fresh",
         "latest_time_utc": "2026-05-29T14:50:00+00:00",
-        "age_hours": 0.5188056422222223,
+        "age_hours": 0.7484990324999999,
         "max_age_hours": 2.0,
         "warning": null
       },
       "taf": {
         "state": "fresh",
         "latest_time_utc": "2026-05-29T11:00:00+00:00",
-        "age_hours": 4.3521389755555555,
+        "age_hours": 4.581832365833334,
         "max_age_hours": 12.0,
         "warning": null
       },
       "nwp": {
         "state": "fresh",
         "latest_time_utc": "2026-05-29T15:03:26.275744+00:00",
-        "age_hours": 0.2948401577777778,
+        "age_hours": 0.5245335480555555,
         "max_age_hours": 18.0,
         "warning": null
       }
@@ -181,21 +181,21 @@
         "metar": {
           "state": "fresh",
           "latest_time_utc": "2026-05-29T14:50:00+00:00",
-          "age_hours": 0.5188105088888889,
+          "age_hours": 0.7485041561111111,
           "max_age_hours": 2.0,
           "warning": null
         },
         "taf": {
           "state": "fresh",
           "latest_time_utc": "2026-05-29T11:00:00+00:00",
-          "age_hours": 4.3521438422222225,
+          "age_hours": 4.581837489444444,
           "max_age_hours": 12.0,
           "warning": null
         },
         "nwp": {
           "state": "fresh",
           "latest_time_utc": "2026-05-29T15:03:26.275744+00:00",
-          "age_hours": 0.29484502444444444,
+          "age_hours": 0.5245386716666667,
           "max_age_hours": 18.0,
           "warning": null
         }

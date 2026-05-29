@@ -27,6 +27,9 @@ Environment variables:
 WEATHER_TMAX_DATA_DIR=data
 WEATHER_TMAX_SEED_DATA_DIR=seed_data
 HOST=0.0.0.0
+WEATHER_TMAX_ENABLE_TELEGRAM=1
+TELEGRAM_BOT_TOKEN=<set in Railway Variables>
+TELEGRAM_CHAT_ID=<set in Railway Variables>
 ```
 
 Railway provides `PORT` automatically.
@@ -77,6 +80,26 @@ Recommended schedule:
 ```
 
 This checks pending forecasts, downloads available DWD truth, rebuilds targets, scores completed forecasts, and refreshes reports.
+
+## Telegram notifications
+
+Set these Railway variables on every service that should send notifications:
+
+```bash
+WEATHER_TMAX_ENABLE_TELEGRAM=1
+TELEGRAM_BOT_TOKEN=<your bot token>
+TELEGRAM_CHAT_ID=<your chat id>
+```
+
+Do not commit the token to GitHub.
+
+Manual test command:
+
+```bash
+python scripts/railway_bootstrap.py && python scripts/32_send_telegram_test.py
+```
+
+Forecast and outcome cron jobs notify by default. Healthcheck only notifies failures by default; add `--notify-on-success` if you want hourly success messages.
 
 ## Cron service: scheduler healthcheck
 

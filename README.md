@@ -47,6 +47,7 @@ python scripts/27_run_operational_cycle.py --airport EDDM --target-date 2026-07-
 python scripts/29_daily_operational_run.py --no-auto-refresh --no-require-ok
 python scripts/30_daily_outcome_update.py
 python scripts/31_scheduler_healthcheck.py --require-forward-ready
+python scripts/32_send_telegram_test.py
 python scripts/23_update_outcomes_and_reports.py
 python scripts/24_refresh_pending_truth.py
 python scripts/25_pending_truth_cron.py --fail-if-ready

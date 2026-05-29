@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import typer
 
+from weather_tmax_bot.notifications.telegram import format_operational_cycle_message, notify_if_configured
 from weather_tmax_bot.operations.workflow import run_operational_cycle
 from weather_tmax_bot.utils.time import parse_issue_time
 
@@ -20,6 +21,7 @@ def main(
     refresh_awc: bool = typer.Option(True),
     refresh_nwp: bool = typer.Option(True),
     update_reports: bool = typer.Option(True),
+    notify: bool = typer.Option(True),
     report_path: str = typer.Option("data/reports/daily_operational_run.json"),
 ):
     issue = parse_issue_time(issue_time)
@@ -38,6 +40,9 @@ def main(
     output = Path(report_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    if notify:
+        summary["telegram_notification"] = notify_if_configured(format_operational_cycle_message(summary))
+        output.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     print(json.dumps(summary, indent=2, default=str))
     if require_ok and not summary["accepted"]:
         raise typer.Exit(code=1)
