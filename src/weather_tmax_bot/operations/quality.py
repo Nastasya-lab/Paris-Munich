@@ -28,7 +28,7 @@ def assess_forecast_quality(feature_snapshot: dict, warnings: list[str] | None =
         try:
             if float(offset) > 30:
                 reasons.append("issue time is outside configured training schedule")
-            elif float(offset) > 0:
+            elif float(offset) > 10:
                 reasons.append("issue time is slightly off configured training schedule")
         except (TypeError, ValueError):
             pass

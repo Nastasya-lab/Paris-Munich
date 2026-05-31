@@ -5,7 +5,7 @@ from datetime import date, datetime
 import pandas as pd
 
 from weather_tmax_bot.features.climatology_features import day_of_year_sin_cos
-from weather_tmax_bot.features.issue_time_features import ISSUE_HOURS_UTC, build_issue_time_features
+from weather_tmax_bot.features.issue_time_features import build_issue_time_features
 from weather_tmax_bot.features.metar_features import build_metar_features
 from weather_tmax_bot.features.nwp_features import build_nwp_features
 from weather_tmax_bot.features.taf_features import build_taf_features
@@ -26,7 +26,7 @@ def build_feature_row(
         "target_date_local": target_date_local.isoformat(),
         "issue_hour_utc": issue_time_utc.hour,
     }
-    features.update(build_issue_time_features(issue_time_utc, target_date_local, ISSUE_HOURS_UTC))
+    features.update(build_issue_time_features(issue_time_utc, target_date_local))
     features.update(day_of_year_sin_cos(target_date_local))
     features.update(build_metar_features(metar if metar is not None else pd.DataFrame(), issue_time_utc, target_date_local))
     features.update(build_taf_features(taf if taf is not None else pd.DataFrame(), issue_time_utc, target_date_local))

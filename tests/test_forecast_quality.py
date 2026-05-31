@@ -109,3 +109,29 @@ def test_forecast_quality_treats_severe_extrapolation_as_degraded():
 
     assert quality["status"] == "degraded"
     assert "live features outside training range" in quality["reasons"]
+
+
+def test_forecast_quality_allows_small_cron_jitter():
+    quality = assess_forecast_quality(
+        {
+            "freshness": {"metar": {"state": "fresh"}, "taf": {"state": "fresh"}, "nwp": {"state": "fresh"}},
+            "issue_schedule_offset_minutes": 2,
+        },
+        [],
+    )
+
+    assert quality["status"] == "ok"
+    assert quality["reasons"] == []
+
+
+def test_forecast_quality_marks_larger_cron_jitter_as_degraded():
+    quality = assess_forecast_quality(
+        {
+            "freshness": {"metar": {"state": "fresh"}, "taf": {"state": "fresh"}, "nwp": {"state": "fresh"}},
+            "issue_schedule_offset_minutes": 15,
+        },
+        [],
+    )
+
+    assert quality["status"] == "degraded"
+    assert "issue time is slightly off configured training schedule" in quality["reasons"]
