@@ -7,7 +7,7 @@ This guide deploys the EDDM Tmax probabilistic forecasting MVP to Railway for au
 - One GitHub-connected Railway project.
 - One persistent Volume mounted at `/app/data`.
 - One always-on API service.
-- Three cron services.
+- Two required cron services and one optional healthcheck cron service.
 
 The project expects its writable state under `/app/data`. The Docker image also contains seed data in `/app/seed_data`; `scripts/railway_bootstrap.py` copies missing files into the mounted Volume on first start.
 
@@ -83,8 +83,9 @@ Recommended schedule:
 ```
 
 This checks pending forecasts, downloads available DWD truth, rebuilds targets, scores completed forecasts, and refreshes reports.
+It also sends the daily Telegram readiness summary, so a separate healthcheck service is optional.
 
-## Cron service: scheduler healthcheck
+## Optional cron service: scheduler healthcheck
 
 Command:
 

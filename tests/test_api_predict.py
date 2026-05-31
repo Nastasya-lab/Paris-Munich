@@ -48,6 +48,7 @@ def test_health_and_model_info():
     assert "pending_rows" in pending_truth
     pending_cron = client.post("/pending-truth-cron", params={"fetch": False, "as_of_date": "2026-05-29"}).json()
     assert "status" in pending_cron
+    assert "scheduler_healthcheck" in pending_cron
     cycle = client.post(
         "/operational-cycle",
         params={

@@ -240,4 +240,7 @@ def post_pending_truth_cron(
     )
     if notify:
         result["telegram_notification"] = notify_if_configured(format_outcome_update_message(result))
+        readiness = assess_launch_readiness()
+        result["scheduler_healthcheck"] = readiness
+        result["healthcheck_telegram_notification"] = notify_if_configured(format_healthcheck_message(readiness))
     return result
