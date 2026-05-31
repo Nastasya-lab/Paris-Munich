@@ -50,3 +50,30 @@ Quick summary:
 - 18 UTC isotonic CDF coverage 50/80/90: `0.283 / 0.450 / 0.456`
 
 Decision: keep isotonic CDF as experimental/report-only for now. It underperforms validation-fitted spread calibration in both the holdout report and quick rolling report.
+
+## Intraday update holdout
+
+The same-day METAR and sampled ICON-D2 update layer now has a separate leakage-safe fixed holdout report:
+
+- `docs/intraday_backtest.md`
+- `data/reports/intraday_backtest_summary.parquet`
+- `data/reports/intraday_backtest_by_hour.parquet`
+- `data/reports/intraday_backtest_by_regime.parquet`
+
+The holdout covers `2025-11-01` to `2025-12-30`. All ICON-D2 residual prior rows, METAR analogue rows, and Tmax timing rows used by the update layer are restricted to dates before `2025-11-01`.
+
+Overall comparison:
+
+| model_variant | rows | mae_expected | rmse_expected | mean_nll | mean_crps | coverage_80 |
+| --- | --- | --- | --- | --- | --- | --- |
+| ICON-D2 prior | 420 | 0.9489 | 1.3307 | 3.4422 | 0.0083 | 0.8286 |
+| ICON-D2 prior plus intraday update | 420 | 0.9113 | 1.3609 | 3.1859 | 0.0088 | 0.8857 |
+
+Expanding rolling comparison, August-December 2025:
+
+| model_variant | rows | mae_expected | rmse_expected | mean_nll | mean_crps | brier_ge_30 | coverage_80 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ICON-D2 prior | 1059 | 0.9380 | 1.2586 | 4.1483 | 0.0073 | 0.0150 | 0.8196 |
+| ICON-D2 prior plus intraday update | 1059 | 0.8213 | 1.1979 | 3.3649 | 0.0076 | 0.0064 | 0.8848 |
+
+Decision: keep the intraday layer enabled as a monitored secondary correction. It improves MAE, RMSE, NLL, Brier for `Tmax >=25C` and `Tmax >=30C`, and 80% interval coverage on the rolling check. CRPS is slightly worse, so final distribution sharpness still needs calibration and forward monitoring.

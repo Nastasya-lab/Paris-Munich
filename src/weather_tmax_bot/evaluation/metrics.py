@@ -30,4 +30,4 @@ def brier(probability: float, event: bool) -> float:
 def crps_discrete(dist: TmaxDistribution, actual: float) -> float:
     cdf = np.cumsum(dist.probabilities)
     obs_cdf = (dist.bins_c >= actual).astype(float)
-    return float(np.mean((cdf - (1 - obs_cdf)) ** 2))
+    return float(np.mean((cdf - obs_cdf) ** 2))

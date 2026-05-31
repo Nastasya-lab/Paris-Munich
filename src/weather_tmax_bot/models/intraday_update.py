@@ -33,6 +33,8 @@ def apply_intraday_update(
     *,
     training_dataset_path: str | Path = "data/processed/training_dataset.parquet",
     daily_target_path: str | Path = "data/processed/daily_target.parquet",
+    training_frame: pd.DataFrame | None = None,
+    daily_target_frame: pd.DataFrame | None = None,
     min_rows: int = 40,
 ) -> IntradayUpdateResult:
     """Blend a full-day prior with a same-day remaining-upside model.
@@ -60,7 +62,7 @@ def apply_intraday_update(
         details["reason"] = "missing_observed_metar_context"
         return IntradayUpdateResult(base_distribution, _with_final(details, base_distribution))
 
-    training = _load_intraday_training(training_dataset_path)
+    training = _load_intraday_training(training_dataset_path, training_frame=training_frame)
     if len(training) < min_rows:
         details["reason"] = "insufficient_intraday_training_rows"
         details["training_rows"] = len(training)
@@ -79,6 +81,7 @@ def apply_intraday_update(
     raw_peak_probability = _weighted_mean(candidates["peak_already_passed"].to_numpy(dtype=float), weights)
     timing_prior = _timing_peak_passed_prior(
         daily_target_path=daily_target_path,
+        daily_target_frame=daily_target_frame,
         target_date=target_date,
         local_hour=local_hour,
     )
@@ -125,11 +128,14 @@ def apply_intraday_update(
     return IntradayUpdateResult(final_dist, _with_final(details, final_dist))
 
 
-def _load_intraday_training(path: str | Path) -> pd.DataFrame:
-    p = Path(path)
-    if not p.exists():
-        return pd.DataFrame()
-    df = pd.read_parquet(p)
+def _load_intraday_training(path: str | Path, *, training_frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    if training_frame is None:
+        p = Path(path)
+        if not p.exists():
+            return pd.DataFrame()
+        df = pd.read_parquet(p)
+    else:
+        df = training_frame.copy()
     required = {"tmax_c", "observed_max_so_far_from_metar", "last_metar_temp_c", "issue_hour_utc", "month"}
     if missing := required.difference(df.columns):
         return pd.DataFrame()
@@ -178,11 +184,20 @@ def _candidate_weights(candidates: pd.DataFrame, feature_row: dict, drop_from_ma
     return np.clip(weights, 1e-6, None)
 
 
-def _timing_peak_passed_prior(*, daily_target_path: str | Path, target_date: date, local_hour: float) -> float | None:
-    path = Path(daily_target_path)
-    if not path.exists():
-        return None
-    target = pd.read_parquet(path)
+def _timing_peak_passed_prior(
+    *,
+    daily_target_path: str | Path,
+    target_date: date,
+    local_hour: float,
+    daily_target_frame: pd.DataFrame | None = None,
+) -> float | None:
+    if daily_target_frame is None:
+        path = Path(daily_target_path)
+        if not path.exists():
+            return None
+        target = pd.read_parquet(path)
+    else:
+        target = daily_target_frame.copy()
     if "tmax_time_local" not in target.columns or "target_date_local" not in target.columns:
         return None
     df = target.copy()
@@ -190,8 +205,9 @@ def _timing_peak_passed_prior(*, daily_target_path: str | Path, target_date: dat
     df = df[df["target_date_local"].dt.month == target_date.month]
     if df.empty:
         return None
-    times = pd.to_datetime(df["tmax_time_local"], errors="coerce")
-    tmax_hour = times.dt.hour + times.dt.minute / 60
+    # Keep the local wall-clock hour across DST transitions. Converting the
+    # mixed +01:00/+02:00 offsets to UTC would answer a different question.
+    tmax_hour = df["tmax_time_local"].map(_local_wall_clock_hour)
     valid = tmax_hour.notna()
     if valid.sum() < 20:
         return None
@@ -333,3 +349,13 @@ def _float_or_nan(value) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float("nan")
+
+
+def _local_wall_clock_hour(value) -> float:
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    if pd.isna(timestamp):
+        return float("nan")
+    return float(timestamp.hour + timestamp.minute / 60)
