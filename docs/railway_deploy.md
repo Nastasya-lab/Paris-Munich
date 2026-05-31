@@ -95,10 +95,10 @@ python scripts/33_call_api_job.py health
 Recommended schedule:
 
 ```text
-15 * * * *
+15 6 * * *
 ```
 
-This asks the main API service to validate the model registry, data freshness, leakage audit, accepted forecasts, and pending truth status on the persistent Volume. It sends Telegram only when the system is blocked.
+This asks the main API service to validate the model registry, data freshness, leakage audit, accepted forecasts, and pending truth status on the persistent Volume. It sends a daily Telegram readiness summary at `06:15 UTC`.
 
 ## Telegram notifications
 

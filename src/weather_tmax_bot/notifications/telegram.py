@@ -56,6 +56,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         f"Quality: {quality.get('status')}",
         f"Freshness gate: {freshness_passed}",
         *_format_freshness(refresh),
+        f"Quality reasons: {', '.join(quality.get('reasons', [])) or 'none'}",
         f"Acceptance blocking: {', '.join(acceptance.get('blocking_reasons', [])) or 'none'}",
         f"Cautions: {', '.join(acceptance.get('cautions', [])) or 'none'}",
         f"Recommendation: {summary.get('recommendation')}",

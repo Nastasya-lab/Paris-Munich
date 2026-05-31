@@ -56,7 +56,7 @@ def test_operational_cycle_message_contains_status():
                 "probabilities_by_integer_c": {"23": 0.12, "24": 0.42, "25": 0.005},
                 "threshold_probabilities": {"ge_20": 0.98, "ge_25": 0.21, "ge_30": 0.01, "le_0": 0.0},
             },
-            "forecast_quality": {"status": "ok"},
+            "forecast_quality": {"status": "ok", "reasons": ["manual test reason"]},
             "forecast_acceptance": {"blocking_reasons": [], "cautions": ["caution"]},
             "refresh_summary": {
                 "freshness_gate": {
@@ -74,3 +74,4 @@ def test_operational_cycle_message_contains_status():
     assert "Most likely bin: 24C" in text
     assert "23C 12.0%, 24C 42.0%" in text
     assert ">=25C 21.0%" in text
+    assert "Quality reasons: manual test reason" in text

@@ -50,7 +50,7 @@ def main(
     elif job == "health":
         response = requests.post(
             f"{base}/scheduler-healthcheck",
-            params={"notify_on_success": False, "notify_on_failure": True},
+            params={"notify_on_success": True, "notify_on_failure": True},
             headers=headers,
             timeout=timeout,
         )
