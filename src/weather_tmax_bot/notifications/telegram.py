@@ -1,11 +1,39 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
+from html import escape
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+LOCAL_TIMEZONE = ZoneInfo("Europe/Berlin")
+
+QUALITY_LABELS = {
+    "ok": "данные прошли проверки",
+    "degraded": "есть ограничения",
+    "invalid": "прогноз нельзя использовать",
+}
+FRESHNESS_LABELS = {
+    "fresh": "свежие",
+    "stale": "устарели",
+    "missing": "нет данных",
+    "future_timestamp": "ошибка времени",
+}
+MESSAGE_LABELS = {
+    "calibration is preliminary": "калибровка вероятностей пока предварительная",
+    "known compatible runtime source differs from training source": "оперативный источник отличается от обучающего, но признан совместимым",
+    "minor live feature extrapolation": "некоторые текущие значения немного выходят за обучающий диапазон",
+    "issue time is outside configured training schedule": "ручной запуск выполнен вне обученного временного слота",
+}
+NEXT_ACTION_LABELS = {
+    "review_outcome_analysis_and_continue_monitoring": "продолжать накопление прогнозов и контроль качества",
+    "continue_forward_logging_until_dwd_truth_is_available": "дождаться публикации фактических данных DWD",
+    "run_pending_truth_cron_with_fetch": "обновить фактические данные DWD",
+    "resolve_forward_ops_blocking_reasons": "устранить причины блокировки",
+}
 
 
 def telegram_configured() -> bool:
@@ -33,7 +61,7 @@ def send_telegram_message(text: str, *, parse_mode: str | None = None, timeout: 
 def notify_if_configured(text: str) -> dict[str, Any]:
     if os.getenv("WEATHER_TMAX_ENABLE_TELEGRAM", "1").strip().lower() in {"0", "false", "no"}:
         return {"sent": False, "reason": "telegram_disabled"}
-    return send_telegram_message(text)
+    return send_telegram_message(text, parse_mode="HTML")
 
 
 def format_operational_cycle_message(summary: dict) -> str:
@@ -41,108 +69,168 @@ def format_operational_cycle_message(summary: dict) -> str:
     quality = summary.get("forecast_quality", {})
     forecast = summary.get("forecast", {})
     refresh = summary.get("refresh_summary") or {}
-    freshness_passed = (refresh.get("freshness_gate") or {}).get("passed")
-    status = "ACCEPTED" if summary.get("accepted") else "REJECTED"
+    accepted = bool(summary.get("accepted"))
+    status = "Прогноз готов" if accepted else "Прогноз требует внимания"
+    status_note = (
+        "Проверки пройдены: прогноз можно использовать."
+        if accepted
+        else "Это тестовый или ограниченный прогноз. Не используйте его как штатный."
+    )
     lines = [
-        f"Weather Tmax Bot: {status}",
-        f"Airport: {summary.get('airport')}",
-        f"Target date: {summary.get('target_date_local')}",
-        f"Issue UTC: {summary.get('issue_time_utc')}",
-        f"Model: {summary.get('model_version')}",
-        f"Forecast ID: {summary.get('forecast_id')}",
+        f"<b>{status}: {escape(str(summary.get('airport', 'EDDM')))}</b>",
+        f"Дата: <b>{escape(str(summary.get('target_date_local', 'не указана')))}</b>",
+        f"Выпуск: {_format_local_time(summary.get('issue_time_utc'))}",
+        status_note,
+        "",
         *_format_temperature_summary(forecast),
+        "",
         *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
-        f"Quality: {quality.get('status')}",
-        f"Freshness gate: {freshness_passed}",
+        "",
+        "<b>Данные</b>",
         *_format_freshness(refresh),
-        f"Quality reasons: {', '.join(quality.get('reasons', [])) or 'none'}",
-        f"Acceptance blocking: {', '.join(acceptance.get('blocking_reasons', [])) or 'none'}",
-        f"Cautions: {', '.join(acceptance.get('cautions', [])) or 'none'}",
-        f"Recommendation: {summary.get('recommendation')}",
+        f"Общая проверка свежести: {_yes_no((refresh.get('freshness_gate') or {}).get('passed'))}",
+        "",
+        "<b>Качество прогноза</b>",
+        f"Статус: {QUALITY_LABELS.get(quality.get('status'), escape(str(quality.get('status', 'неизвестен'))))}",
+        *_format_notices(quality.get("reasons", []), "Причина"),
+        *_format_notices(acceptance.get("cautions", []), "Важно"),
+        "",
+        "<b>Технические сведения</b>",
+        f"Модель: <code>{escape(str(summary.get('model_version', 'не указана')))}</code>",
+        f"ID прогноза: <code>{escape(str(summary.get('forecast_id', 'не указан')))}</code>",
     ]
     return "\n".join(lines)
 
 
 def _format_temperature_summary(forecast: dict) -> list[str]:
     if not forecast:
-        return ["Forecast values: unavailable"]
+        return ["<b>Температурный прогноз</b>", "Значения пока недоступны."]
     interval = forecast.get("intervals", {}).get("80", [])
-    interval_text = "unavailable"
+    interval_text = "недоступен"
     if len(interval) == 2:
-        interval_text = f"{float(interval[0]):.1f}C to {float(interval[1]):.1f}C"
+        interval_text = f"{float(interval[0]):.1f}...{float(interval[1]):.1f} °C"
     return [
-        "",
-        "Forecast:",
-        f"Expected Tmax: {float(forecast['expected_tmax_c']):.1f}C",
-        f"Median Tmax: {float(forecast['median_tmax_c']):.1f}C",
-        f"Most likely bin: {int(forecast['most_likely_integer_c'])}C",
-        f"80% interval: {interval_text}",
+        "<b>Температурный прогноз</b>",
+        f"Ожидаемый максимум: <b>{float(forecast['expected_tmax_c']):.1f} °C</b>",
+        f"Медиана: {float(forecast['median_tmax_c']):.1f} °C",
+        f"Самая вероятная корзина: <b>{int(forecast['most_likely_integer_c'])} °C</b>",
+        f"Интервал 80%: {interval_text}",
     ]
 
 
 def _format_probability_bins(probabilities: dict) -> list[str]:
     if not probabilities:
-        return []
+        return ["<b>Вероятности по градусам</b>", "Нет данных."]
     rows = sorted((int(bin_c), float(probability)) for bin_c, probability in probabilities.items())
     material = [(bin_c, probability) for bin_c, probability in rows if probability >= 0.01]
     if not material:
         material = sorted(rows, key=lambda row: row[1], reverse=True)[:5]
         material.sort()
-    bins = ", ".join(f"{bin_c}C {probability:.1%}" for bin_c, probability in material)
-    return [f"Bins >= 1%: {bins}"]
+    return [
+        "<b>Вероятности по градусам</b>",
+        "\n".join(f"{bin_c:+d} °C: <b>{probability:.1%}</b>" for bin_c, probability in material),
+    ]
 
 
 def _format_thresholds(thresholds: dict) -> list[str]:
     if not thresholds:
         return []
     return [
-        "Thresholds: "
-        f">=20C {float(thresholds.get('ge_20', 0.0)):.1%}, "
-        f">=25C {float(thresholds.get('ge_25', 0.0)):.1%}, "
-        f">=30C {float(thresholds.get('ge_30', 0.0)):.1%}, "
-        f"<=0C {float(thresholds.get('le_0', 0.0)):.1%}",
+        "",
+        "<b>Вероятности событий</b>",
+        f"Не ниже +20 °C: {float(thresholds.get('ge_20', 0.0)):.1%}",
+        f"Не ниже +25 °C: {float(thresholds.get('ge_25', 0.0)):.1%}",
+        f"Не ниже +30 °C: {float(thresholds.get('ge_30', 0.0)):.1%}",
+        f"Не выше 0 °C: {float(thresholds.get('le_0', 0.0)):.1%}",
     ]
 
 
 def _format_freshness(refresh: dict) -> list[str]:
     statuses = ((refresh.get("freshness_gate") or {}).get("freshness") or {}).get("statuses", {})
     if not statuses:
-        return []
-    parts = []
+        return ["Сведения о свежести источников недоступны."]
+    source_labels = {"metar": "METAR", "taf": "TAF", "nwp": "Численная модель"}
+    lines = []
     for source in ("metar", "taf", "nwp"):
         status = statuses.get(source, {})
         age = status.get("age_hours")
-        age_text = "unknown" if age is None else f"{float(age):.1f}h"
-        parts.append(f"{source.upper()} {status.get('state', 'unknown')} ({age_text})")
-    return ["Freshness: " + ", ".join(parts)]
+        age_text = "возраст неизвестен" if age is None else f"{float(age):.1f} ч назад"
+        state = FRESHNESS_LABELS.get(status.get("state"), escape(str(status.get("state", "неизвестно"))))
+        lines.append(f"{source_labels[source]}: {state}, {age_text}")
+    return lines
 
 
 def format_outcome_update_message(result: dict) -> str:
     status = result.get("status", {})
     refresh = result.get("refresh_summary") or {}
+    ran_refresh = bool(result.get("ran_refresh"))
     lines = [
-        "Weather Tmax Bot: outcome update",
-        f"Pending rows: {status.get('pending_rows')}",
-        f"Ready rows: {status.get('ready_rows')}",
-        f"Dates to refresh: {', '.join(status.get('dates_to_refresh', [])) or 'none'}",
-        f"Ran refresh: {result.get('ran_refresh')}",
-        f"Reports updated: {result.get('reports_updated')}",
-        f"Monitoring rows: {refresh.get('forecast_monitoring_rows')}",
-        f"Recommendation: {result.get('recommendation')}",
+        "<b>Обновление фактических результатов</b>",
+        "Проверка завершена.",
+        "",
+        f"Ожидают данных DWD: <b>{status.get('pending_rows', 0)}</b>",
+        f"Готовы к оценке: <b>{status.get('ready_rows', 0)}</b>",
+        f"Обновление выполнено: {_yes_no(ran_refresh)}",
     ]
+    if ran_refresh:
+        lines.extend(
+            [
+                f"Загружено наблюдений: {refresh.get('fetched_rows', 0)}",
+                f"Оценено прогнозов: {refresh.get('forecast_monitoring_rows', 0)}",
+            ]
+        )
+    elif status.get("pending_rows"):
+        lines.append("Новых завершенных суток для оценки пока нет.")
     return "\n".join(lines)
 
 
 def format_healthcheck_message(readiness: dict) -> str:
-    status = "READY" if readiness.get("ready_for_forward_ops") else "BLOCKED"
+    ready = bool(readiness.get("ready_for_forward_ops"))
+    status = "Система работает штатно" if ready else "Системе требуется внимание"
     lines = [
-        f"Weather Tmax Bot healthcheck: {status}",
-        f"Forward ops: {readiness.get('ready_for_forward_ops')}",
-        f"Outcome monitoring: {readiness.get('ready_for_outcome_monitoring')}",
-        f"Blocking: {', '.join(readiness.get('blocking_reasons', [])) or 'none'}",
-        f"Accepted forecasts: {readiness.get('accepted_operational_forecasts')}",
-        f"Pending truth rows: {readiness.get('pending_truth_rows')}",
-        f"Next action: {readiness.get('next_action')}",
+        f"<b>{status}</b>",
+        "",
+        f"Выпуск прогнозов: {_enabled_disabled(ready)}",
+        f"Контроль качества: {_enabled_disabled(bool(readiness.get('ready_for_outcome_monitoring')))}",
+        f"Принято штатных прогнозов: {readiness.get('accepted_operational_forecasts', 0)}",
+        f"Ожидают фактических данных: {readiness.get('pending_truth_rows', 0)}",
     ]
+    reasons = readiness.get("blocking_reasons", [])
+    if reasons:
+        lines.extend(["", "<b>Причины блокировки</b>", *_format_notices(reasons, "Проверка")])
+    lines.extend(
+        [
+            "",
+            f"Следующий шаг: {_translate(readiness.get('next_action'))}",
+        ]
+    )
     return "\n".join(lines)
+
+
+def _format_notices(messages: list[str], prefix: str) -> list[str]:
+    return [f"{prefix}: {_translate(message)}" for message in messages]
+
+
+def _translate(message: Any) -> str:
+    text = str(message or "не указан")
+    return escape(MESSAGE_LABELS.get(text, NEXT_ACTION_LABELS.get(text, text)))
+
+
+def _format_local_time(value: Any) -> str:
+    if not value:
+        return "не указано"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        localized = parsed.astimezone(LOCAL_TIMEZONE)
+        return f"<b>{localized:%d.%m.%Y %H:%M}</b> по Мюнхену"
+    except ValueError:
+        return escape(str(value))
+
+
+def _yes_no(value: Any) -> str:
+    return "да" if value else "нет"
+
+
+def _enabled_disabled(value: bool) -> str:
+    return "работает" if value else "не готов"

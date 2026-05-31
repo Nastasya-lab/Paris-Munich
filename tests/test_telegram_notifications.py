@@ -39,7 +39,22 @@ def test_send_telegram_message_uses_env(monkeypatch):
     assert calls["json"]["text"] == "hello"
 
 
-def test_operational_cycle_message_contains_status():
+def test_notify_uses_html_formatting(monkeypatch):
+    calls = {}
+
+    def fake_send(text, *, parse_mode=None, timeout=15):
+        calls["text"] = text
+        calls["parse_mode"] = parse_mode
+        return {"sent": True}
+
+    monkeypatch.setattr(telegram, "send_telegram_message", fake_send)
+
+    telegram.notify_if_configured("<b>Прогноз</b>")
+
+    assert calls["parse_mode"] == "HTML"
+
+
+def test_operational_cycle_message_is_human_readable_russian():
     text = telegram.format_operational_cycle_message(
         {
             "accepted": True,
@@ -56,8 +71,11 @@ def test_operational_cycle_message_contains_status():
                 "probabilities_by_integer_c": {"23": 0.12, "24": 0.42, "25": 0.005},
                 "threshold_probabilities": {"ge_20": 0.98, "ge_25": 0.21, "ge_30": 0.01, "le_0": 0.0},
             },
-            "forecast_quality": {"status": "ok", "reasons": ["manual test reason"]},
-            "forecast_acceptance": {"blocking_reasons": [], "cautions": ["caution"]},
+            "forecast_quality": {"status": "ok", "reasons": []},
+            "forecast_acceptance": {
+                "blocking_reasons": [],
+                "cautions": ["calibration is preliminary"],
+            },
             "refresh_summary": {
                 "freshness_gate": {
                     "passed": True,
@@ -68,10 +86,46 @@ def test_operational_cycle_message_contains_status():
         }
     )
 
-    assert "ACCEPTED" in text
+    assert "Прогноз готов" in text
     assert "EDDM" in text
-    assert "Expected Tmax: 24.3C" in text
-    assert "Most likely bin: 24C" in text
-    assert "23C 12.0%, 24C 42.0%" in text
-    assert ">=25C 21.0%" in text
-    assert "Quality reasons: manual test reason" in text
+    assert "29.05.2026 17:00" in text
+    assert "Ожидаемый максимум: <b>24.3 °C</b>" in text
+    assert "Самая вероятная корзина: <b>24 °C</b>" in text
+    assert "+23 °C: <b>12.0%</b>" in text
+    assert "Не ниже +25 °C: 21.0%" in text
+    assert "калибровка вероятностей пока предварительная" in text
+
+
+def test_operational_cycle_message_escapes_dynamic_html():
+    text = telegram.format_operational_cycle_message(
+        {
+            "accepted": False,
+            "airport": "<EDDM>",
+            "forecast_quality": {"status": "degraded", "reasons": ["<unsafe>"]},
+            "forecast_acceptance": {"cautions": []},
+        }
+    )
+
+    assert "&lt;EDDM&gt;" in text
+    assert "&lt;unsafe&gt;" in text
+    assert "<unsafe>" not in text
+
+
+def test_outcome_and_healthcheck_messages_are_russian():
+    outcome = telegram.format_outcome_update_message(
+        {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}
+    )
+    health = telegram.format_healthcheck_message(
+        {
+            "ready_for_forward_ops": True,
+            "ready_for_outcome_monitoring": True,
+            "accepted_operational_forecasts": 1,
+            "pending_truth_rows": 2,
+            "next_action": "review_outcome_analysis_and_continue_monitoring",
+        }
+    )
+
+    assert "Обновление фактических результатов" in outcome
+    assert "Новых завершенных суток" in outcome
+    assert "Система работает штатно" in health
+    assert "продолжать накопление прогнозов" in health
