@@ -60,19 +60,22 @@ python scripts/33_call_api_job.py forecast
 Recommended Railway cron schedule in UTC:
 
 ```text
-0 6,9,12,15 * * *
+40 1,4,7,10,13,16,19 * * *
 ```
 
-This single expression runs `forecast-cron` four times per day. Each run refreshes live
+This single expression runs `forecast-cron` after the expected ICON-D2 availability
+window rather than exactly at the model initialisation time. Each run refreshes live
 METAR, TAF, and NWP data, creates a new as-of forecast, logs it, and sends the updated
 forecast to Telegram.
 
-The release times are `06:00`, `09:00`, `12:00`, and `15:00 UTC`. On May 31 they
-correspond to `08:00`, `11:00`, `14:00`, and `17:00 Europe/Berlin`, or `09:00`,
-`12:00`, `15:00`, and `18:00 Europe/Moscow`.
+The release times are `01:40`, `04:40`, `07:40`, `10:40`, `13:40`, `16:40`, and
+`19:40 UTC`. On May 31 they correspond to `03:40`, `06:40`, `09:40`, `12:40`,
+`15:40`, `18:40`, and `21:40 Europe/Berlin`, or `04:40`, `07:40`, `10:40`,
+`13:40`, `16:40`, `19:40`, and `22:40 Europe/Moscow`.
 
-These issue hours are inside the MVP training schedule. You can also add `0`, `3`,
-and `18 UTC` later if additional updates are useful.
+The code still accepts the earlier top-of-hour slots during migration, but the
+availability-aware schedule is preferred for production because new ICON-D2 data is
+not generally available at the exact model initialisation hour.
 
 ## Cron service: outcome update
 

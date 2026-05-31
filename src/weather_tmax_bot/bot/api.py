@@ -74,6 +74,7 @@ def predict(airport: str = "EDDM", target_date: date | None = None, issue_time: 
             "data_freshness": feature_snapshot.get("freshness", {}),
             "extrapolation": feature_snapshot.get("extrapolation", {}),
             "source_compatibility": feature_snapshot.get("source_compatibility", {}),
+            "forecast_components": feature_snapshot.get("forecast_components", {}),
             "forecast_quality": quality,
             "forecast_acceptance": acceptance,
             "forecast_id": forecast_id,

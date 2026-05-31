@@ -63,7 +63,7 @@ def _recommendation(status: str, reasons: list[str], cautions: list[str] | None 
     if any("stale" in reason or "missing" in reason for reason in reasons):
         return "Refresh operational data before relying on this forecast, e.g. run predict with --auto-refresh."
     if any("issue time" in reason for reason in reasons):
-        return "Prefer configured issue times 00/03/06/09/12/15/18 UTC, or retrain with this operational schedule."
+        return "Prefer configured issue times 00/03/06/09/12/15/18 UTC or ICON availability-aware +01:40 slots."
     if any("known compatible runtime source" in caution for caution in cautions):
         return "Use forecast with monitoring; runtime source is known-compatible but should be tracked separately."
     if any("minor live feature extrapolation" in caution for caution in cautions):

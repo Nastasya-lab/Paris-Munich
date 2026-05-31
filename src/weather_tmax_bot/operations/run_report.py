@@ -25,6 +25,7 @@ def operational_prediction_payload(
             "data_freshness": result["feature_snapshot"].get("freshness", {}),
             "extrapolation": result["feature_snapshot"].get("extrapolation", {}),
             "source_compatibility": result["feature_snapshot"].get("source_compatibility", {}),
+            "forecast_components": result["feature_snapshot"].get("forecast_components", {}),
             "forecast_quality": result["forecast_quality"],
             "forecast_acceptance": result["forecast_acceptance"],
             "refresh_summary": result.get("refresh_summary"),

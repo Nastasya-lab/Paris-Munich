@@ -54,6 +54,7 @@ def predict(
             data_lineage=result["data_lineage"],
             forecast_quality=result["forecast_quality"],
             forecast_acceptance=result["forecast_acceptance"],
+            forecast_components=result["feature_snapshot"].get("forecast_components", {}),
             warnings=result["warnings"],
         )
     )

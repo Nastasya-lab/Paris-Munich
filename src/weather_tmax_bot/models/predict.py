@@ -8,6 +8,7 @@ import pandas as pd
 from weather_tmax_bot.features.build_features import build_feature_row
 from weather_tmax_bot.models.baselines import ClimatologyBaseline
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
+from weather_tmax_bot.models.intraday_update import apply_intraday_update
 from weather_tmax_bot.models.model_registry import load_model, resolve_active_artifacts
 from weather_tmax_bot.temporal.freshness import assess_feature_freshness
 from weather_tmax_bot.temporal.source_compatibility import assess_source_compatibility
@@ -63,6 +64,21 @@ def predict_best_available(
             calibrator = load_model(calibrator_path)
             dist = calibrator.transform(dist).truncate_below(observed_max)
             warnings.append("Validation-fitted spread calibration applied.")
+        intraday = apply_intraday_update(dist, feature_row, target_date, issue_time_utc)
+        dist = intraday.distribution
+        feature_row["intraday_update"] = intraday.details
+        feature_row["forecast_components"] = {
+            "base_model": intraday.details.get("base_model"),
+            "intraday_update": {
+                key: value
+                for key, value in intraday.details.items()
+                if key not in {"base_model", "intraday_model", "final_model"}
+            },
+            "intraday_model": intraday.details.get("intraday_model"),
+            "final_model": intraday.details.get("final_model"),
+        }
+        if intraday.details.get("active"):
+            warnings.append("Intraday update applied: base prior blended with current METAR/TAF/NWP remaining-day signal.")
         if model.__class__.__name__ == "QuantileTmaxModel":
             warnings.append("Quantile MVP model used; calibration layer is still preliminary.")
         else:

@@ -8,6 +8,12 @@ from weather_tmax_bot.utils.time import local_day_bounds_utc
 
 
 ISSUE_HOURS_UTC = [0, 3, 6, 9, 12, 15, 18]
+OPERATIONAL_ISSUE_SCHEDULE_MINUTES_UTC = [
+    *(hour * 60 for hour in ISSUE_HOURS_UTC),
+    # Open-Meteo regional-model metadata advises waiting after model availability.
+    # These slots are intended for ICON-D2 availability-aware production forecasts.
+    *(((hour * 60 + 100) % 1440) for hour in ISSUE_HOURS_UTC),
+]
 
 
 def build_issue_time_features(
@@ -23,7 +29,11 @@ def build_issue_time_features(
     else:
         issue = issue.tz_convert("UTC")
     minute_of_day = issue.hour * 60 + issue.minute
-    scheduled_minutes = [hour * 60 for hour in issue_hours]
+    scheduled_minutes = (
+        OPERATIONAL_ISSUE_SCHEDULE_MINUTES_UTC
+        if issue_hours_utc is None
+        else [hour * 60 for hour in issue_hours]
+    )
     nearest_offset = min(abs(minute_of_day - value) for value in scheduled_minutes)
     # Wrap around midnight, e.g. 23:50 is 10 minutes from 00 UTC.
     nearest_offset = min(nearest_offset, min(1440 - abs(minute_of_day - value) for value in scheduled_minutes))

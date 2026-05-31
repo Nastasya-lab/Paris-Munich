@@ -79,6 +79,7 @@ def _forecast_summary(payload: dict) -> dict:
         "probabilities_by_integer_c": payload["probabilities_by_integer_c"],
         "threshold_probabilities": payload["threshold_probabilities"],
         "data_freshness": payload.get("data_freshness", {}),
+        "forecast_components": payload.get("forecast_components", {}),
     }
 
 

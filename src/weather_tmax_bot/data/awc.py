@@ -19,10 +19,13 @@ class AWCAdapter:
     def __init__(self, user_agent: str = "weather-tmax-bot/0.1"):
         self.headers = {"User-Agent": user_agent}
 
-    def fetch_latest_metar(self, airport: str = "EDDM") -> pd.DataFrame:
+    def fetch_latest_metar(self, airport: str = "EDDM", hours: int | None = None) -> pd.DataFrame:
+        params = {"ids": airport, "format": "json"}
+        if hours is not None:
+            params["hours"] = int(hours)
         response = requests.get(
             AWC_METAR_URL,
-            params={"ids": airport, "format": "json"},
+            params=params,
             headers=self.headers,
             timeout=30,
         )
@@ -49,12 +52,12 @@ class AWCAdapter:
                     "source_version": "awc.api.data.metar.json",
                     "source_url_or_reference": AWC_METAR_URL,
                     "raw_metar": raw,
-                    "temperature_c": _coalesce(item.get("temp"), parsed.get("temperature_c")),
-                    "dewpoint_c": _coalesce(item.get("dewp"), parsed.get("dewpoint_c")),
+                    "temperature_c": _numeric_or_none(_coalesce(item.get("temp"), parsed.get("temperature_c"))),
+                    "dewpoint_c": _numeric_or_none(_coalesce(item.get("dewp"), parsed.get("dewpoint_c"))),
                     "qnh_hpa": parsed.get("qnh_hpa"),
-                    "wind_direction_deg": _coalesce(item.get("wdir"), parsed.get("wind_direction_deg")),
-                    "wind_speed_kt": _coalesce(item.get("wspd"), parsed.get("wind_speed_kt")),
-                    "gust_kt": _coalesce(item.get("wgst"), parsed.get("gust_kt")),
+                    "wind_direction_deg": _numeric_or_none(_coalesce(item.get("wdir"), parsed.get("wind_direction_deg"))),
+                    "wind_speed_kt": _numeric_or_none(_coalesce(item.get("wspd"), parsed.get("wind_speed_kt"))),
+                    "gust_kt": _numeric_or_none(_coalesce(item.get("wgst"), parsed.get("gust_kt"))),
                     "visibility": item.get("visib"),
                     "weather_codes": item.get("wxString"),
                     "cloud_layers": stable_hash(item.get("clouds", [])),
@@ -109,6 +112,11 @@ class AWCAdapter:
 
 def _coalesce(primary, fallback):
     return fallback if primary is None or pd.isna(primary) else primary
+
+
+def _numeric_or_none(value):
+    parsed = pd.to_numeric(value, errors="coerce")
+    return None if pd.isna(parsed) else float(parsed)
 
 
 def _parse_awc_time(value):

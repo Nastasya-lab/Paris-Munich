@@ -86,6 +86,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         "",
         *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
+        *_format_intraday_summary(forecast.get("forecast_components", {})),
         "",
         "<b>Данные</b>",
         *_format_freshness(refresh),
@@ -144,6 +145,37 @@ def _format_thresholds(thresholds: dict) -> list[str]:
         f"Не ниже +30 °C: {float(thresholds.get('ge_30', 0.0)):.1%}",
         f"Не выше 0 °C: {float(thresholds.get('le_0', 0.0)):.1%}",
     ]
+
+
+def _format_intraday_summary(components: dict) -> list[str]:
+    intraday = (components or {}).get("intraday_update") or {}
+    if not intraday:
+        return []
+    base = (components or {}).get("base_model") or {}
+    lines = [
+        "",
+        "<b>Сигналы модели</b>",
+        f"Базовый ICON-D2 prior: {_format_expected(base)}",
+    ]
+    if not intraday.get("active"):
+        reason = escape(str(intraday.get("reason") or "нет причины"))
+        lines.append(f"Внутридневное уточнение: неактивно ({reason})")
+        return lines
+    lines.extend(
+        [
+            "Внутридневное уточнение: активно",
+            f"Вероятность, что пик уже был: <b>{float(intraday.get('peak_passed_probability', 0.0)):.1%}</b>",
+            f"Наблюдаемый максимум: {float(intraday.get('observed_max_so_far_c', 0.0)):.1f} °C",
+            f"Падение от пика: {float(intraday.get('drop_from_observed_max_c', 0.0)):.1f} °C",
+            f"Вес уточнения в итоге: {float(intraday.get('intraday_blend_weight', 0.0)):.1%}",
+        ]
+    )
+    return lines
+
+
+def _format_expected(component: dict) -> str:
+    value = component.get("expected_tmax_c")
+    return "недоступен" if value is None else f"{float(value):.1f} °C"
 
 
 def _format_freshness(refresh: dict) -> list[str]:

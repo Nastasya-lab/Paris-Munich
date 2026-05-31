@@ -57,3 +57,19 @@ def test_refresh_open_meteo_nwp_uses_fetcher(monkeypatch, tmp_path):
 
     assert summary["rows_fetched"] == 1
     assert summary["archive_rows"] == 1
+
+
+def test_refresh_frame_normalizes_mixed_awc_visibility_types():
+    rows = pd.DataFrame(
+        {
+            "visibility": [6.0, "6+"],
+            "wind_direction_deg": [270, "VRB"],
+            "temperature_c": ["18", 19],
+        }
+    )
+
+    normalized = refresh_module._normalize_refresh_frame(rows)
+
+    assert str(normalized["visibility"].dtype) == "string"
+    assert pd.isna(normalized.iloc[1]["wind_direction_deg"])
+    assert normalized.iloc[0]["temperature_c"] == 18

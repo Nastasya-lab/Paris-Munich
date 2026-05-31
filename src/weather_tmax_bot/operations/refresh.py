@@ -37,7 +37,7 @@ def refresh_operational_data(
 def refresh_awc_live(airport: str = "EDDM", root: str | Path = ".") -> dict:
     root = Path(root)
     adapter = AWCAdapter()
-    metar = adapter.fetch_latest_metar(airport)
+    metar = adapter.fetch_latest_metar(airport, hours=30)
     taf = adapter.fetch_latest_taf(airport)
     metar_path = root / f"data/forecasts/awc_metar_live_{airport}.parquet"
     taf_path = root / f"data/forecasts/awc_taf_live_{airport}.parquet"
@@ -77,8 +77,20 @@ def _append_dedup(rows: pd.DataFrame, path: Path) -> None:
         subset = [col for col in ("raw_record_hash",) if col in rows.columns]
         if subset:
             rows = rows.drop_duplicates(subset=subset, keep="last")
+    rows = _normalize_refresh_frame(rows)
     write_parquet(rows, path)
 
 
 def _rows(path: Path) -> int:
     return 0 if not path.exists() else len(pd.read_parquet(path))
+
+
+def _normalize_refresh_frame(rows: pd.DataFrame) -> pd.DataFrame:
+    rows = rows.copy()
+    for col in ("visibility", "weather_codes", "cloud_layers", "ceiling_ft"):
+        if col in rows.columns:
+            rows[col] = rows[col].astype("string")
+    for col in ("temperature_c", "dewpoint_c", "qnh_hpa", "wind_direction_deg", "wind_speed_kt", "gust_kt"):
+        if col in rows.columns:
+            rows[col] = pd.to_numeric(rows[col], errors="coerce")
+    return rows

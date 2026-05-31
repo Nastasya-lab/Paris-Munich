@@ -14,6 +14,7 @@ def format_prediction(
     data_lineage: dict | None = None,
     forecast_quality: dict | None = None,
     forecast_acceptance: dict | None = None,
+    forecast_components: dict | None = None,
     warnings: list[str] | None = None,
 ) -> str:
     payload = dist.to_payload()
@@ -46,6 +47,26 @@ def format_prediction(
         f"P(Tmax >= 30C): {100 * payload['threshold_probabilities']['ge_30']:.1f}%",
         f"P(Tmax <= 0C): {100 * payload['threshold_probabilities']['le_0']:.1f}%",
     ]
+    intraday = (forecast_components or {}).get("intraday_update") or {}
+    base = (forecast_components or {}).get("base_model") or {}
+    if intraday:
+        lines += [
+            "",
+            "Model signals:",
+            f"- base expected Tmax: {_fmt_component_expected(base)}",
+            f"- intraday active: {intraday.get('active')}",
+        ]
+        if intraday.get("active"):
+            lines.extend(
+                [
+                    f"- peak already passed probability: {100 * float(intraday.get('peak_passed_probability', 0.0)):.1f}%",
+                    f"- observed max so far: {float(intraday.get('observed_max_so_far_c')):.1f}C",
+                    f"- drop from observed max: {float(intraday.get('drop_from_observed_max_c')):.1f}C",
+                    f"- intraday blend weight: {100 * float(intraday.get('intraday_blend_weight', 0.0)):.1f}%",
+                ]
+            )
+        elif intraday.get("reason"):
+            lines.append(f"- intraday reason: {intraday.get('reason')}")
     if data_lineage:
         lines.append("")
         lines.append("Data used:")
@@ -73,3 +94,8 @@ def format_prediction(
         lines.append("Warnings:")
         lines.extend(f"- {w}" for w in warnings)
     return "\n".join(lines)
+
+
+def _fmt_component_expected(component: dict) -> str:
+    value = component.get("expected_tmax_c")
+    return "not available" if value is None else f"{float(value):.1f}C"
