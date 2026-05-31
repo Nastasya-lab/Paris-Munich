@@ -55,3 +55,25 @@ def test_resolve_active_artifacts_falls_back_to_quantile_mvp(tmp_path):
 
     assert active["model_path"] == fallback
     assert active["calibrator_path"] is None
+
+
+def test_resolve_active_artifacts_normalizes_windows_paths(tmp_path):
+    model_path = tmp_path / "data" / "models" / "candidate.joblib"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_bytes(b"x")
+    registry = {
+        "active_model_version": "candidate",
+        "active_calibrator_version": None,
+        "entries": [
+            {
+                "version": "candidate",
+                "artifact_type": "model",
+                "path": str(model_path).replace("/", "\\"),
+            }
+        ],
+    }
+    (tmp_path / "model_registry.json").write_text(__import__("json").dumps(registry), encoding="utf-8")
+
+    active = resolve_active_artifacts(model_dir=tmp_path, fallback_model_path=tmp_path / "missing.joblib")
+
+    assert active["model_path"] == model_path

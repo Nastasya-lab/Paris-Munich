@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +118,10 @@ def _path_for(entries: list[dict], version: str | None, artifact_type: str) -> P
         return None
     for entry in entries:
         if entry.get("version") == version and entry.get("artifact_type") == artifact_type:
-            path = Path(entry["path"])
+            path = _stored_path(entry["path"])
             return path if path.exists() else None
     return None
+
+
+def _stored_path(value: str) -> Path:
+    return Path(value.replace("\\", os.sep).replace("/", os.sep))
