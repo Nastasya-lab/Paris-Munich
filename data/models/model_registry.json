@@ -1,6 +1,6 @@
 {
-  "active_model_version": "quantile_mvp_issue_features_20260529",
-  "active_calibrator_version": "quantile_mvp_issue_features_20260529.calibrator",
+  "active_model_version": "nwp_residual_icon_d2_20260531",
+  "active_calibrator_version": null,
   "entries": [
     {
       "version": "quantile_mvp_retrain_20260528",
@@ -57,21 +57,31 @@
       "path": "data\\models\\quantile_mvp_nwp_single_runs_20260531.calibrator.joblib",
       "metadata_path": "data\\models\\quantile_mvp_nwp_single_runs_20260531.calibrator.metadata.json",
       "metrics": {}
+    },
+    {
+      "version": "nwp_residual_icon_d2_20260531",
+      "artifact_type": "model",
+      "path": "data\\models\\nwp_residual_icon_d2_20260531.joblib",
+      "metadata_path": "data\\models\\nwp_residual_icon_d2_20260531.metadata.json",
+      "metrics": {
+        "rows": 1029,
+        "mae_expected": 0.7074662225082066,
+        "rmse_expected": 0.9420635785396765,
+        "bias_expected": 0.12781171635645297,
+        "mean_nll": 1.4040034420503755,
+        "mean_crps": 0.9776920183356095
+      }
     }
   ],
   "promotion": {
-    "reason": "automatic_retraining_gates_passed",
+    "reason": "nwp_residual_holdout_gates_passed",
     "metrics": {
-      "mae_median": 2.373611111111111,
-      "rmse_mean": 3.0336994352416617,
-      "mean_nll": 2.4408623805901666,
-      "mean_crps": 0.9327176518777618,
-      "coverage_50": 0.5055555555555555,
-      "coverage_80": 0.8,
-      "coverage_90": 0.9527777777777777,
-      "brier_ge_20": 0.06499725114652623,
-      "brier_ge_25": 0.04132369902442865,
-      "brier_ge_30": 0.01526253078400117
+      "rows": 1029,
+      "mae_expected": 0.7074662225082066,
+      "rmse_expected": 0.9420635785396765,
+      "bias_expected": 0.12781171635645297,
+      "mean_nll": 1.4040034420503755,
+      "mean_crps": 0.9776920183356095
     }
   }
 }

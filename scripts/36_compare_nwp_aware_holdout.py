@@ -6,6 +6,7 @@ import pandas as pd
 
 from weather_tmax_bot.data.storage import write_parquet
 from weather_tmax_bot.evaluation.metrics import bias, crps_discrete, mae, nll_integer_bin, rmse
+from weather_tmax_bot.models.baselines import ResidualNWPBaseline
 from weather_tmax_bot.models.quantile_model import QuantileTmaxModel
 
 
@@ -21,9 +22,9 @@ NWP_COLUMNS = {
 def main() -> None:
     dataset = pd.read_parquet("data/processed/training_dataset.parquet")
     dataset["target_date_local"] = pd.to_datetime(dataset["target_date_local"]).dt.date
-    start = pd.to_datetime("2025-09-01").date()
-    test_start = pd.to_datetime("2025-12-01").date()
-    test_end = pd.to_datetime("2025-12-31").date()
+    start = pd.to_datetime("2025-05-31").date()
+    test_start = pd.to_datetime("2026-01-01").date()
+    test_end = pd.to_datetime("2026-05-27").date()
     df = dataset[
         (dataset["target_date_local"] >= start)
         & (dataset["target_date_local"] <= test_end)
@@ -36,6 +37,10 @@ def main() -> None:
 
     with_nwp = QuantileTmaxModel().fit(train.drop(columns=["tmax_c"]), train["tmax_c"])
     without_nwp = QuantileTmaxModel().fit(_drop_nwp(train.drop(columns=["tmax_c"])), train["tmax_c"])
+    residual_nwp = ResidualNWPBaseline().fit(
+        train["tmax_c"].to_numpy(dtype=float),
+        train["model_tmax_c"].to_numpy(dtype=float),
+    )
 
     rows = []
     for _, row in test.iterrows():
@@ -44,6 +49,7 @@ def main() -> None:
         dist_without = without_nwp.predict_distribution(_drop_nwp(pd.DataFrame([row.drop(labels=["tmax_c"])])))
         rows.append(_score("quantile_with_nwp", row, dist_with, actual))
         rows.append(_score("quantile_without_nwp", row, dist_without, actual))
+        rows.append(_score("bias_corrected_nwp_residual_distribution", row, residual_nwp.predict_distribution(float(row["model_tmax_c"])), actual))
         rows.append(_score_point("raw_nwp_model_tmax", row, actual))
 
     scored = pd.DataFrame(rows)

@@ -50,7 +50,11 @@ def predict_best_available(
         )
         model = load_model(resolved_model_path)
         observed_max = feature_row.get("observed_max_so_far_from_metar")
-        dist = model.predict_distribution(pd.DataFrame([feature_row]), observed_max_so_far=observed_max)
+        try:
+            dist = model.predict_distribution(pd.DataFrame([feature_row]), observed_max_so_far=observed_max)
+        except ValueError as exc:
+            warnings.append(f"Active model could not use current features: {exc}; climatology fallback used.")
+            dist = predict_with_climatology(target_date, daily_target_path=daily_target_path, observed_max_so_far=observed_max)
         extrapolation = detect_feature_extrapolation(feature_row, model)
         feature_row["extrapolation"] = extrapolation
         warnings.extend(extrapolation["warnings"])
@@ -59,7 +63,10 @@ def predict_best_available(
             calibrator = load_model(calibrator_path)
             dist = calibrator.transform(dist).truncate_below(observed_max)
             warnings.append("Validation-fitted spread calibration applied.")
-        warnings.append("Quantile MVP model used; calibration layer is still preliminary.")
+        if model.__class__.__name__ == "QuantileTmaxModel":
+            warnings.append("Quantile MVP model used; calibration layer is still preliminary.")
+        else:
+            warnings.append(f"{model.__class__.__name__} model used; monitor NWP source availability and residual calibration.")
         freshness = assess_feature_freshness(feature_row, issue_time_utc)
         feature_row["freshness"] = freshness["statuses"]
         warnings.extend(freshness["warnings"])

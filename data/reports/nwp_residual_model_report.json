@@ -1,0 +1,12 @@
+{
+  "model_version": "nwp_residual_icon_d2_20260531",
+  "promoted": true,
+  "metrics": {
+    "rows": 1029,
+    "mae_expected": 0.7074662225082066,
+    "rmse_expected": 0.9420635785396765,
+    "bias_expected": 0.12781171635645297,
+    "mean_nll": 1.4040034420503755,
+    "mean_crps": 0.9776920183356095
+  }
+}

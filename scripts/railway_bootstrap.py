@@ -28,6 +28,9 @@ def _seed_if_missing(seed_dir: Path, data_dir: Path) -> None:
         target.mkdir(parents=True, exist_ok=True)
         for item in source.iterdir():
             destination = target / item.name
+            if name == "models" and item.name == "model_registry.json":
+                shutil.copy2(item, destination)
+                continue
             if destination.exists():
                 continue
             if item.is_dir():

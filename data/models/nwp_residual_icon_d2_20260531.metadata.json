@@ -1,0 +1,26 @@
+{
+  "model_name": "nwp_residual_distribution",
+  "model_version": "nwp_residual_icon_d2_20260531",
+  "training_period": [
+    "2025-07-27",
+    "2026-05-27"
+  ],
+  "validation_period": [
+    "2026-01-01",
+    "2026-05-27"
+  ],
+  "feature_set_version": "nwp_residual.v1",
+  "source_registry_version": "2026-05-31.nwp_single_runs",
+  "data_snapshot_hash": "2725e9f93b07bf87ce2de47ecdb51b146cfd1cc625f6c148a04a9739fc189980",
+  "calibration_version": "empirical_residual_distribution",
+  "git_commit": null,
+  "created_at_utc": "2026-05-31T13:24:24.577960+00:00",
+  "metrics": {
+    "rows": 1029,
+    "mae_expected": 0.7074662225082066,
+    "rmse_expected": 0.9420635785396765,
+    "bias_expected": 0.12781171635645297,
+    "mean_nll": 1.4040034420503755,
+    "mean_crps": 0.9776920183356095
+  }
+}
