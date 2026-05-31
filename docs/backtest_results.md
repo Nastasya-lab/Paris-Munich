@@ -2,25 +2,25 @@
 
 Current report covers the climatology baseline on available DWD targets. NWP forecast-as-issued backtests remain separated until honest issued archives exist.
 
-Rows: 438
-MAE median: 3.543150684931507
-RMSE mean: 4.229571994361522
+Rows: 468
+MAE median: 3.6534188034188033
+RMSE mean: 4.40326035347395
 
 
 Quantile MVP holdout, issue hour 06 UTC, test from 2025-01-01:
-Rows: 360
-Raw MAE/RMSE: 2.3825000000000003 / 3.041662065086618
-Raw NLL/CRPS: 2.8937126365839805 / 0.9366949039810141
-Raw coverage 50/80/90: 0.425 / 0.7055555555555556 / 0.8138888888888889
-Calibrated spread sigma bins: 1.25
-Calibrated MAE/RMSE: 2.3997222222222225 / 3.0416620650866184
-Calibrated NLL/CRPS: 2.441389383129616 / 0.9323430384793384
-Calibrated coverage 50/80/90: 0.49722222222222223 / 0.8083333333333333 / 0.9416666666666667
-Calibrated Brier ge20/ge25/ge30: 0.06509948669387937 / 0.040719224710150305 / 0.015323420109800596
-Isotonic CDF MAE/RMSE: 2.3908333333333336 / 3.0369422640580797
-Isotonic CDF NLL/CRPS: 3.927774575315914 / 0.9386782573728654
-Isotonic CDF coverage 50/80/90: 0.43333333333333335 / 0.7388888888888889 / 0.8055555555555556
-Isotonic CDF Brier ge20/ge25/ge30: 0.06676726180575353 / 0.04072444599264593 / 0.014488611689317471
+Rows: 507
+Raw MAE/RMSE: 3.394674556213018 / 4.613416837301871
+Raw NLL/CRPS: 4.885223420787219 / 0.030716105846409793
+Raw coverage 50/80/90: 0.42011834319526625 / 0.6410256410256411 / 0.7218934911242604
+Calibrated spread sigma bins: 2.25
+Calibrated MAE/RMSE: 3.4171597633136095 / 4.613416837301871
+Calibrated NLL/CRPS: 3.0222391817663334 / 0.03010888140217276
+Calibrated coverage 50/80/90: 0.5187376725838264 / 0.8027613412228797 / 0.8757396449704142
+Calibrated Brier ge20/ge25/ge30: 0.070672696449986 / 0.04161429351286225 / 0.014865070349069153
+Isotonic CDF MAE/RMSE: 3.370216962524655 / 4.483350608156453
+Isotonic CDF NLL/CRPS: 8.918887773687812 / 0.029817465935358462
+Isotonic CDF coverage 50/80/90: 0.47928994082840237 / 0.6666666666666666 / 0.8382642998027613
+Isotonic CDF Brier ge20/ge25/ge30: 0.071014259679178 / 0.04066120947974048 / 0.014449143331548025
 
 Generated plots:
 - `data/reports/pit_raw.png`
@@ -28,41 +28,42 @@ Generated plots:
 - `data/reports/reliability_ge_25_calibrated.png`
 - `data/reports/reliability_ge_30_calibrated.png`
 
-Quick expanding rolling backtest:
+## Quantile MVP rolling baseline
 
-- `data/reports/rolling_quantile_backtest.parquet`
-- `data/reports/rolling_quantile_summary.parquet`
-- `data/reports/rolling_quantile_seasonal_summary.parquet`
+The recalculated quick expanding rolling report covers issue hours `06` and `18` UTC for the 2025 test window:
 
-Default quick run covers issue hours `06` and `18` UTC for the 2025 test window, calibrated on 2024 and trained through 2023. Full mode is available with:
+| forecast_variant | issue_hour_utc | rows | mae_median | rmse_mean | mean_nll | mean_crps | coverage_80 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| raw | 06 | 360 | 2.4542 | 3.0918 | 3.1511 | 0.0210 | 0.6972 |
+| calibrated spread | 06 | 360 | 2.4297 | 3.0918 | 2.4551 | 0.0207 | 0.8111 |
+| raw | 18 | 360 | 0.4292 | 0.9468 | 1.1121 | 0.0043 | 0.6306 |
+| calibrated spread | 18 | 360 | 0.4319 | 0.9468 | 0.9714 | 0.0043 | 0.8944 |
 
-```bash
-python scripts/08b_run_rolling_backtest.py --full
-```
+Decision: keep isotonic CDF as experimental/report-only. Validation-fitted spread calibration remains the quantile MVP comparison baseline.
 
-Quick summary:
+## NWP-aware holdout
 
-- 06 UTC raw coverage 50/80/90: `0.406 / 0.700 / 0.836`
-- 06 UTC spread coverage 50/80/90: `0.486 / 0.817 / 0.933`
-- 06 UTC isotonic CDF coverage 50/80/90: `0.436 / 0.761 / 0.839`
-- 18 UTC raw coverage 50/80/90: `0.269 / 0.658 / 0.803`
-- 18 UTC spread coverage 50/80/90: `0.392 / 0.906 / 0.992`
-- 18 UTC isotonic CDF coverage 50/80/90: `0.283 / 0.450 / 0.456`
+The issued ICON-D2 holdout comparison is available in `docs/nwp_aware_holdout.md`.
 
-Decision: keep isotonic CDF as experimental/report-only for now. It underperforms validation-fitted spread calibration in both the holdout report and quick rolling report.
+| model_variant | rows | mae_expected | rmse_expected | mean_nll | mean_crps |
+| --- | --- | --- | --- | --- | --- |
+| ICON-D2 residual distribution | 1029 | 0.7075 | 0.9421 | 1.4040 | 0.0068 |
+| raw ICON-D2 model Tmax | 1029 | 0.7700 | 1.0182 | n/a | n/a |
+| quantile MVP with NWP | 1029 | 5.1047 | 5.7635 | 5.1326 | 0.0388 |
+| quantile MVP without NWP | 1029 | 6.8928 | 8.3799 | 10.8705 | 0.0688 |
+
+Decision: keep the ICON-D2 residual distribution as the operational prior. The older quantile MVP remains a historical baseline and should not replace it.
 
 ## Intraday update holdout
 
-The same-day METAR and sampled ICON-D2 update layer now has a separate leakage-safe fixed holdout report:
+The same-day METAR and sampled ICON-D2 update layer has separate leakage-safe reports:
 
 - `docs/intraday_backtest.md`
+- `docs/intraday_rolling_backtest.md`
 - `data/reports/intraday_backtest_summary.parquet`
-- `data/reports/intraday_backtest_by_hour.parquet`
-- `data/reports/intraday_backtest_by_regime.parquet`
+- `data/reports/intraday_rolling_backtest_summary.parquet`
 
-The holdout covers `2025-11-01` to `2025-12-30`. All ICON-D2 residual prior rows, METAR analogue rows, and Tmax timing rows used by the update layer are restricted to dates before `2025-11-01`.
-
-Overall comparison:
+Fixed mature-history comparison, November-December 2025:
 
 | model_variant | rows | mae_expected | rmse_expected | mean_nll | mean_crps | coverage_80 |
 | --- | --- | --- | --- | --- | --- | --- |

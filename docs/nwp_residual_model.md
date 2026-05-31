@@ -9,4 +9,4 @@ Production-compatible probabilistic MOS baseline using ICON-D2 `model_tmax_c` pl
 - RMSE expected: `0.9420635785396765`
 - bias expected: `0.12781171635645297`
 - NLL: `1.4040034420503755`
-- CRPS: `0.9776920183356095`
+- CRPS: `0.006756439782960472`
