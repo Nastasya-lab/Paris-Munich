@@ -14,11 +14,13 @@ from weather_tmax_bot.evaluation.operational_api import operational_monitoring_p
 from weather_tmax_bot.models.registry_health import registry_health
 from weather_tmax_bot.models.predict import predict_best_available
 from weather_tmax_bot.notifications.telegram import (
+    format_healthcheck_message,
     format_operational_cycle_message,
     format_outcome_update_message,
     notify_if_configured,
 )
 from weather_tmax_bot.operations.acceptance import evaluate_forecast_acceptance
+from weather_tmax_bot.operations.launch_readiness import assess_launch_readiness
 from weather_tmax_bot.operations.refresh import refresh_operational_data
 from weather_tmax_bot.operations.predict_run import run_prediction_with_optional_refresh
 from weather_tmax_bot.operations.pending_truth import pending_truth_status, run_pending_truth_cron
@@ -150,6 +152,23 @@ def predict_operational(
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "weather_tmax_bot"}
+
+
+@app.post("/scheduler-healthcheck")
+def scheduler_healthcheck(
+    notify_on_success: bool = False,
+    notify_on_failure: bool = True,
+    api_key: str | None = None,
+    x_api_key: str | None = Header(default=None),
+):
+    _require_api_key(x_api_key=x_api_key, api_key=api_key)
+    readiness = assess_launch_readiness()
+    should_notify = (readiness["ready_for_forward_ops"] and notify_on_success) or (
+        not readiness["ready_for_forward_ops"] and notify_on_failure
+    )
+    if should_notify:
+        readiness["telegram_notification"] = notify_if_configured(format_healthcheck_message(readiness))
+    return readiness
 
 
 @app.get("/model-info")

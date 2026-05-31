@@ -39,6 +39,7 @@ def notify_if_configured(text: str) -> dict[str, Any]:
 def format_operational_cycle_message(summary: dict) -> str:
     acceptance = summary.get("forecast_acceptance", {})
     quality = summary.get("forecast_quality", {})
+    forecast = summary.get("forecast", {})
     refresh = summary.get("refresh_summary") or {}
     freshness_passed = (refresh.get("freshness_gate") or {}).get("passed")
     status = "ACCEPTED" if summary.get("accepted") else "REJECTED"
@@ -49,13 +50,71 @@ def format_operational_cycle_message(summary: dict) -> str:
         f"Issue UTC: {summary.get('issue_time_utc')}",
         f"Model: {summary.get('model_version')}",
         f"Forecast ID: {summary.get('forecast_id')}",
+        *_format_temperature_summary(forecast),
+        *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
+        *_format_thresholds(forecast.get("threshold_probabilities", {})),
         f"Quality: {quality.get('status')}",
         f"Freshness gate: {freshness_passed}",
+        *_format_freshness(refresh),
         f"Acceptance blocking: {', '.join(acceptance.get('blocking_reasons', [])) or 'none'}",
         f"Cautions: {', '.join(acceptance.get('cautions', [])) or 'none'}",
         f"Recommendation: {summary.get('recommendation')}",
     ]
     return "\n".join(lines)
+
+
+def _format_temperature_summary(forecast: dict) -> list[str]:
+    if not forecast:
+        return ["Forecast values: unavailable"]
+    interval = forecast.get("intervals", {}).get("80", [])
+    interval_text = "unavailable"
+    if len(interval) == 2:
+        interval_text = f"{float(interval[0]):.1f}C to {float(interval[1]):.1f}C"
+    return [
+        "",
+        "Forecast:",
+        f"Expected Tmax: {float(forecast['expected_tmax_c']):.1f}C",
+        f"Median Tmax: {float(forecast['median_tmax_c']):.1f}C",
+        f"Most likely bin: {int(forecast['most_likely_integer_c'])}C",
+        f"80% interval: {interval_text}",
+    ]
+
+
+def _format_probability_bins(probabilities: dict) -> list[str]:
+    if not probabilities:
+        return []
+    rows = sorted((int(bin_c), float(probability)) for bin_c, probability in probabilities.items())
+    material = [(bin_c, probability) for bin_c, probability in rows if probability >= 0.01]
+    if not material:
+        material = sorted(rows, key=lambda row: row[1], reverse=True)[:5]
+        material.sort()
+    bins = ", ".join(f"{bin_c}C {probability:.1%}" for bin_c, probability in material)
+    return [f"Bins >= 1%: {bins}"]
+
+
+def _format_thresholds(thresholds: dict) -> list[str]:
+    if not thresholds:
+        return []
+    return [
+        "Thresholds: "
+        f">=20C {float(thresholds.get('ge_20', 0.0)):.1%}, "
+        f">=25C {float(thresholds.get('ge_25', 0.0)):.1%}, "
+        f">=30C {float(thresholds.get('ge_30', 0.0)):.1%}, "
+        f"<=0C {float(thresholds.get('le_0', 0.0)):.1%}",
+    ]
+
+
+def _format_freshness(refresh: dict) -> list[str]:
+    statuses = ((refresh.get("freshness_gate") or {}).get("freshness") or {}).get("statuses", {})
+    if not statuses:
+        return []
+    parts = []
+    for source in ("metar", "taf", "nwp"):
+        status = statuses.get(source, {})
+        age = status.get("age_hours")
+        age_text = "unknown" if age is None else f"{float(age):.1f}h"
+        parts.append(f"{source.upper()} {status.get('state', 'unknown')} ({age_text})")
+    return ["Freshness: " + ", ".join(parts)]
 
 
 def format_outcome_update_message(result: dict) -> str:

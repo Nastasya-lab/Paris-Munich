@@ -48,12 +48,29 @@ def test_operational_cycle_message_contains_status():
             "issue_time_utc": "2026-05-29T15:00:00Z",
             "model_version": "m1",
             "forecast_id": "f1",
+            "forecast": {
+                "expected_tmax_c": 24.3,
+                "median_tmax_c": 24.0,
+                "most_likely_integer_c": 24,
+                "intervals": {"80": [22.0, 27.0]},
+                "probabilities_by_integer_c": {"23": 0.12, "24": 0.42, "25": 0.005},
+                "threshold_probabilities": {"ge_20": 0.98, "ge_25": 0.21, "ge_30": 0.01, "le_0": 0.0},
+            },
             "forecast_quality": {"status": "ok"},
             "forecast_acceptance": {"blocking_reasons": [], "cautions": ["caution"]},
-            "refresh_summary": {"freshness_gate": {"passed": True}},
+            "refresh_summary": {
+                "freshness_gate": {
+                    "passed": True,
+                    "freshness": {"statuses": {"metar": {"state": "fresh", "age_hours": 0.3}}},
+                }
+            },
             "recommendation": "ok",
         }
     )
 
     assert "ACCEPTED" in text
     assert "EDDM" in text
+    assert "Expected Tmax: 24.3C" in text
+    assert "Most likely bin: 24C" in text
+    assert "23C 12.0%, 24C 42.0%" in text
+    assert ">=25C 21.0%" in text

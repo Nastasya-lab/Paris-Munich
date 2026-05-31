@@ -58,6 +58,7 @@ def run_operational_cycle(
         "issue_time_utc": issue_time_utc.isoformat(),
         "forecast_id": prediction["forecast_id"],
         "model_version": prediction["metadata"]["model_version"],
+        "forecast": _forecast_summary(prediction_payload),
         "forecast_quality": prediction["forecast_quality"],
         "forecast_acceptance": prediction["forecast_acceptance"],
         "accepted": bool(prediction["forecast_acceptance"].get("accepted", False)),
@@ -66,6 +67,18 @@ def run_operational_cycle(
         "prediction_report_path": str(prediction_report_path),
         "report_summary": report_summary,
         "recommendation": _recommendation(prediction["forecast_acceptance"]),
+    }
+
+
+def _forecast_summary(payload: dict) -> dict:
+    return {
+        "expected_tmax_c": payload["expected_tmax_c"],
+        "median_tmax_c": payload["median_tmax_c"],
+        "most_likely_integer_c": payload["most_likely_integer_c"],
+        "intervals": payload["intervals"],
+        "probabilities_by_integer_c": payload["probabilities_by_integer_c"],
+        "threshold_probabilities": payload["threshold_probabilities"],
+        "data_freshness": payload.get("data_freshness", {}),
     }
 
 

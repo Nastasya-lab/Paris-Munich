@@ -10,7 +10,7 @@ import typer
 
 
 def main(
-    job: str = typer.Argument(..., help="forecast or outcome"),
+    job: str = typer.Argument(..., help="forecast, outcome, or health"),
     base_url: str | None = typer.Option(None),
     airport: str = typer.Option("EDDM"),
     target_date: str | None = typer.Option(None),
@@ -47,8 +47,15 @@ def main(
             headers=headers,
             timeout=timeout,
         )
+    elif job == "health":
+        response = requests.post(
+            f"{base}/scheduler-healthcheck",
+            params={"notify_on_success": False, "notify_on_failure": True},
+            headers=headers,
+            timeout=timeout,
+        )
     else:
-        raise typer.BadParameter("job must be forecast or outcome")
+        raise typer.BadParameter("job must be forecast, outcome, or health")
     response.raise_for_status()
     print(json.dumps(response.json(), indent=2, default=str))
 

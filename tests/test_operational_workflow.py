@@ -25,6 +25,8 @@ def test_operational_cycle_writes_prediction_report_without_network(tmp_path):
     payload = json.loads(report_path.read_text(encoding="utf-8"))
     assert summary["forecast_id"] is None
     assert summary["prediction_report_path"] == str(report_path)
+    assert "expected_tmax_c" in summary["forecast"]
+    assert "probabilities_by_integer_c" in summary["forecast"]
     assert "forecast_acceptance" in payload
     assert "report_summary" in summary
     assert summary["report_summary"]["monitoring_report_updated"] is False

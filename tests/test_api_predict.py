@@ -21,6 +21,8 @@ def test_api_predict_returns_distribution(tmp_path, monkeypatch):
 def test_health_and_model_info():
     client = TestClient(app)
     assert client.get("/health").json()["status"] == "ok"
+    scheduler_health = client.post("/scheduler-healthcheck", params={"notify_on_failure": False}).json()
+    assert "ready_for_forward_ops" in scheduler_health
     payload = client.get("/model-info").json()
     assert "models" in payload
     assert "active_model" in payload
@@ -96,6 +98,9 @@ def test_operational_mutation_endpoints_can_require_api_key(monkeypatch):
         },
     )
     assert rejected.status_code == 401
+
+    rejected_health = client.post("/scheduler-healthcheck", params={"notify_on_failure": False})
+    assert rejected_health.status_code == 401
 
     accepted = client.post(
         "/operational-cycle",

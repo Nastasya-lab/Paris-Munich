@@ -84,6 +84,22 @@ Recommended schedule:
 
 This checks pending forecasts, downloads available DWD truth, rebuilds targets, scores completed forecasts, and refreshes reports.
 
+## Cron service: scheduler healthcheck
+
+Command:
+
+```bash
+python scripts/33_call_api_job.py health
+```
+
+Recommended schedule:
+
+```text
+15 * * * *
+```
+
+This asks the main API service to validate the model registry, data freshness, leakage audit, accepted forecasts, and pending truth status on the persistent Volume. It sends Telegram only when the system is blocked.
+
 ## Telegram notifications
 
 Set these Railway variables on every service that should send notifications:
@@ -103,22 +119,6 @@ python scripts/railway_bootstrap.py && python scripts/32_send_telegram_test.py
 ```
 
 Forecast and outcome cron jobs notify by default. Healthcheck only notifies failures by default; add `--notify-on-success` if you want hourly success messages.
-
-## Cron service: scheduler healthcheck
-
-Command:
-
-```bash
-python scripts/railway_bootstrap.py && python scripts/31_scheduler_healthcheck.py --require-forward-ready
-```
-
-Recommended schedule:
-
-```text
-15 * * * *
-```
-
-This exits non-zero if the forward system is not launch-ready.
 
 Cron service variables:
 
