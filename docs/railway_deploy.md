@@ -57,16 +57,22 @@ Command:
 python scripts/33_call_api_job.py forecast
 ```
 
-Recommended cron schedules in UTC:
+Recommended Railway cron schedule in UTC:
 
 ```text
-0 6 * * *
-0 9 * * *
-0 12 * * *
-0 15 * * *
+0 6,9,12,15 * * *
 ```
 
-These issue hours are inside the MVP training schedule. You can also add `0 0 * * *`, `0 3 * * *`, and `0 18 * * *` if useful.
+This single expression runs `forecast-cron` four times per day. Each run refreshes live
+METAR, TAF, and NWP data, creates a new as-of forecast, logs it, and sends the updated
+forecast to Telegram.
+
+The release times are `06:00`, `09:00`, `12:00`, and `15:00 UTC`. On May 31 they
+correspond to `08:00`, `11:00`, `14:00`, and `17:00 Europe/Berlin`, or `09:00`,
+`12:00`, `15:00`, and `18:00 Europe/Moscow`.
+
+These issue hours are inside the MVP training schedule. You can also add `0`, `3`,
+and `18 UTC` later if additional updates are useful.
 
 ## Cron service: outcome update
 
