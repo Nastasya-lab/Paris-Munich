@@ -45,10 +45,17 @@ def build_nwp_feature_table(
 
 
 def build_nwp_feature_table_from_files(
-    nwp_path: str | Path = "data/forecasts/open_meteo_archive.parquet",
+    nwp_paths: list[str | Path] | None = None,
     target_path: str | Path = "data/processed/daily_target.parquet",
 ) -> pd.DataFrame:
-    nwp = pd.read_parquet(nwp_path)
+    paths = nwp_paths or [
+        "data/forecasts/open_meteo_archive.parquet",
+        "data/forecasts/open_meteo_single_runs_icon_d2.parquet",
+    ]
+    frames = [pd.read_parquet(path) for path in paths if Path(path).exists()]
+    if not frames:
+        return pd.DataFrame()
+    nwp = pd.concat(frames, ignore_index=True)
     target_dates = sorted(nwp["target_date_local"].astype(str).unique().tolist())
     if Path(target_path).exists():
         target = pd.read_parquet(target_path)

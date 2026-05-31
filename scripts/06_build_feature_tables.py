@@ -19,9 +19,12 @@ def main():
         print(f"Wrote {len(metar_features)} METAR feature rows")
     elif run_all or args.metar:
         print("No METAR parquet found; skipping METAR feature table")
-    nwp_path = Path("data/forecasts/open_meteo_archive.parquet")
-    if (run_all or args.nwp) and nwp_path.exists():
-        nwp_features = build_nwp_feature_table_from_files(nwp_path=nwp_path)
+    nwp_paths = [
+        Path("data/forecasts/open_meteo_archive.parquet"),
+        Path("data/forecasts/open_meteo_single_runs_icon_d2.parquet"),
+    ]
+    if (run_all or args.nwp) and any(path.exists() for path in nwp_paths):
+        nwp_features = build_nwp_feature_table_from_files(nwp_paths=nwp_paths)
         write_parquet(nwp_features, "data/processed/nwp_features_open_meteo.parquet")
         print(f"Wrote {len(nwp_features)} NWP feature rows")
     elif run_all or args.nwp:

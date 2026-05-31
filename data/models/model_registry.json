@@ -43,6 +43,20 @@
       "path": "data\\models\\quantile_mvp_issue_features_20260529.calibrator.joblib",
       "metadata_path": "data\\models\\quantile_mvp_issue_features_20260529.calibrator.metadata.json",
       "metrics": {}
+    },
+    {
+      "version": "quantile_mvp_nwp_single_runs_20260531",
+      "artifact_type": "model",
+      "path": "data\\models\\quantile_mvp_nwp_single_runs_20260531.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_nwp_single_runs_20260531.metadata.json",
+      "metrics": {}
+    },
+    {
+      "version": "quantile_mvp_nwp_single_runs_20260531.calibrator",
+      "artifact_type": "calibrator",
+      "path": "data\\models\\quantile_mvp_nwp_single_runs_20260531.calibrator.joblib",
+      "metadata_path": "data\\models\\quantile_mvp_nwp_single_runs_20260531.calibrator.metadata.json",
+      "metrics": {}
     }
   ],
   "promotion": {

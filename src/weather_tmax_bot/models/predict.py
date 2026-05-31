@@ -118,9 +118,17 @@ def _load_metar_for_issue(airport: str, target_date: date, issue_time_utc: datet
 
 
 def _load_nwp_for_issue(target_date: date, issue_time_utc: datetime) -> pd.DataFrame:
-    nwp = _load_optional("data/forecasts/open_meteo_archive.parquet")
-    if nwp.empty:
-        return nwp
+    frames = [
+        frame
+        for path in (
+            "data/forecasts/open_meteo_archive.parquet",
+            "data/forecasts/open_meteo_single_runs_icon_d2.parquet",
+        )
+        if not (frame := _load_optional(path)).empty
+    ]
+    if not frames:
+        return pd.DataFrame()
+    nwp = pd.concat(frames, ignore_index=True)
     nwp = nwp[nwp["target_date_local"].astype(str) == target_date.isoformat()].copy()
     if nwp.empty:
         return nwp

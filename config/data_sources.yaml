@@ -132,6 +132,17 @@ sources:
     whether_forecast_as_issued: true
     whether_allowed_for_training_features: true
     whether_allowed_for_truth_target: false
+  - source_id: open_meteo.single_run.icon_d2
+    name: Open-Meteo Single Runs ICON-D2 issued forecast backfill
+    type: nwp
+    historical_availability: "concrete ICON-D2 runs exposed by Open-Meteo Single Runs API; validate requested period"
+    latency_assumption: "knowledge_time = model_run_time + configured conservative availability latency"
+    update_frequency: "ICON-D2 run schedule; backfill requests preserve run identity"
+    license_notes: "Open-Meteo terms apply"
+    quality_notes: "allowed only with concrete run parameter; never replace with seamless historical weather"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
   - source_id: open_meteo.live.icon_d2
     name: Open-Meteo live ICON-D2 forecast archived at ingest
     type: nwp
