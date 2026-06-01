@@ -100,7 +100,7 @@ def predict_best_available(
             "intraday_model": intraday.details.get("intraday_model"),
             "final_model": intraday.details.get("final_model"),
             "shadow_mode": {
-                "name": "seasonal_hour_aware_challenger_v2",
+                "name": "phase_aware_intraday_challenger_v3",
                 "status": "shadow_only_does_not_affect_operational_forecast",
                 "intraday_update": {
                     key: value

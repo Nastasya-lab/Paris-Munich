@@ -418,7 +418,7 @@ def _resolve_intraday_blend_weight(
     elif phase == "late_nowcast":
         weight = max(weight, 0.65)
     return float(weight), {
-        "blend_weight_profile": "seasonal_hour_aware_challenger_v2",
+        "blend_weight_profile": "phase_aware_intraday_challenger_v3",
         "shadow_mode": True,
         "seasonal_profile": season,
         "seasonal_weight_group": "local_hour_curve",

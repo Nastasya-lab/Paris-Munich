@@ -92,7 +92,7 @@ def test_seasonal_shadow_morning_keeps_intraday_weak_when_nwp_still_heats(tmp_pa
         blend_weight_profile="seasonal_shadow",
     )
 
-    assert shadow.details["blend_weight_profile"] == "seasonal_hour_aware_challenger_v2"
+    assert shadow.details["blend_weight_profile"] == "phase_aware_intraday_challenger_v3"
     assert shadow.details["local_issue_hour"] == 8.0
     assert shadow.details["forecast_phase"] == "morning_prior"
     assert shadow.details["scenario_tracking"] == "temporary_disruption_possible"
@@ -221,7 +221,7 @@ def test_seasonal_shadow_uses_warm_profile_without_changing_production(tmp_path)
 
     assert production.details["blend_weight_profile"] == "production_dynamic_v1"
     assert production.details["shadow_mode"] is False
-    assert shadow.details["blend_weight_profile"] == "seasonal_hour_aware_challenger_v2"
+    assert shadow.details["blend_weight_profile"] == "phase_aware_intraday_challenger_v3"
     assert shadow.details["shadow_mode"] is True
     assert shadow.details["seasonal_profile"] == "warm"
     assert shadow.details["seasonal_weight_group"] == "local_hour_curve"
