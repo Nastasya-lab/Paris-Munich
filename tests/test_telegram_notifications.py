@@ -220,6 +220,36 @@ def test_metar_event_message_says_when_distribution_is_unchanged():
     assert "+22 °C: <b>100.0%</b> (+0.0 п.п.)" in text
 
 
+def test_metar_event_message_includes_shadow_distribution_without_deltas():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.4,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {},
+            "probabilities_by_integer_c": {"22": 1.0},
+            "forecast_components": {
+                "intraday_update": {},
+                "shadow_mode": {
+                    "intraday_update": {"intraday_blend_weight": 0.1},
+                    "final_model": {
+                        "expected_tmax_c": 22.8,
+                        "probabilities_by_integer_c": {"21": 0.1, "22": 0.5, "23": 0.4},
+                        "threshold_probabilities": {"ge_30": 0.0},
+                    },
+                },
+            },
+        },
+        {"previous": None, "current": {}, "deltas": {}},
+    )
+
+    assert "Shadow-\u0441\u0446\u0435\u043d\u0430\u0440\u0438\u0439" in text
+    assert "\u0420\u0430\u0441\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435: +21 \u00b0C 10.0%, +22 \u00b0C 50.0%, +23 \u00b0C 40.0%" in text
+    assert "\u043f.\u043f." not in text.split("Shadow-\u0441\u0446\u0435\u043d\u0430\u0440\u0438\u0439", 1)[1]
+
+
 def test_outcome_and_healthcheck_messages_are_russian():
     outcome = telegram.format_outcome_update_message(
         {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}
