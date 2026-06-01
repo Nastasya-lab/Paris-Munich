@@ -44,6 +44,7 @@ def run_metar_event_cycle(
     before_metar = _latest_metar_time(root, airport)
     refresh_summary = {"airport": airport, "target_date_local": target_date_local.isoformat(), "sources": {"awc": refresh_awc_live(airport, root)}}
     after_metar = _latest_metar_time(root, airport)
+    latest_metar_record = _latest_metar_record(root, airport)
     if after_metar is None:
         return {
             "status": "no_metar_available",
@@ -83,6 +84,7 @@ def run_metar_event_cycle(
         result=result,
     )
     payload["refresh_summary"] = refresh_summary
+    payload["latest_metar_record"] = latest_metar_record
     comparison = compare_forecast_to_previous(payload, previous_record)
     should_notify, notification_reasons = should_notify_metar_event(payload, comparison)
     telegram_notification = None
@@ -95,6 +97,7 @@ def run_metar_event_cycle(
         "issue_time_utc": issue_time_utc.isoformat(),
         "previous_metar_time_utc": None if before_metar is None else before_metar.isoformat(),
         "latest_metar_time_utc": after_metar.isoformat(),
+        "latest_metar_record": latest_metar_record,
         "forecast_id": result["forecast_id"],
         "model_version": result["metadata"]["model_version"],
         "forecast": {
@@ -190,6 +193,45 @@ def _latest_metar_time(root: Path, airport: str) -> pd.Timestamp | None:
     if times.empty:
         return None
     return times.max()
+
+
+def _latest_metar_record(root: Path, airport: str) -> dict[str, Any] | None:
+    path = root / f"data/forecasts/awc_metar_live_{airport}.parquet"
+    if not path.exists():
+        return None
+    df = pd.read_parquet(path)
+    if df.empty or "observation_time_utc" not in df.columns:
+        return None
+    out = df.copy()
+    out["observation_time_utc"] = pd.to_datetime(out["observation_time_utc"], utc=True, errors="coerce")
+    out = out.dropna(subset=["observation_time_utc"]).sort_values("observation_time_utc")
+    if out.empty:
+        return None
+    row = out.iloc[-1]
+    fields = {
+        "observation_time_utc": row.get("observation_time_utc"),
+        "knowledge_time_utc": row.get("knowledge_time_utc"),
+        "temperature_c": row.get("temperature_c"),
+        "dewpoint_c": row.get("dewpoint_c"),
+        "raw_metar": row.get("raw_metar"),
+        "source_id": row.get("source_id"),
+    }
+    return {key: _json_safe_value(value) for key, value in fields.items() if _json_safe_value(value) is not None}
+
+
+def _json_safe_value(value: Any) -> Any:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        return value.isoformat()
+    if isinstance(value, (int, float, str, bool)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _latest_forecast_record(path: Path, *, airport: str, target_date_local: date) -> dict | None:

@@ -260,6 +260,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
     forecast_components = payload.get("forecast_components", {}) or {}
     intraday = forecast_components.get("intraday_update", {}) or {}
     shadow = forecast_components.get("shadow_mode", {}) or {}
+    latest_metar = payload.get("latest_metar_record") or {}
     previous = comparison.get("previous") or {}
     current = comparison.get("current") or {}
     deltas = comparison.get("deltas") or {}
@@ -303,6 +304,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
             f"Вес intraday champion: {float(intraday.get('intraday_blend_weight', 0.0)):.1%}",
         ]
     )
+    lines.extend(["", *_format_latest_metar_record(latest_metar)])
     lines.extend(["", *_format_distribution_change(payload, previous)])
     shadow_final = shadow.get("final_model") or {}
     shadow_intraday = shadow.get("intraday_update") or {}
@@ -331,6 +333,21 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
 
 def _signed_pp(value: Any) -> str:
     return "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445" if value is None else f"{float(value) * 100:+.1f} \u043f.\u043f."
+
+
+def _format_latest_metar_record(record: dict) -> list[str]:
+    if not record:
+        return []
+    lines = ["<b>\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u043d\u044b\u0439 METAR</b>"]
+    observation_time = record.get("observation_time_utc")
+    if observation_time:
+        lines.append(f"\u0412\u0440\u0435\u043c\u044f: {_format_local_time(observation_time)}")
+    if record.get("temperature_c") is not None:
+        lines.append(f"\u0422\u0435\u043c\u043f\u0435\u0440\u0430\u0442\u0443\u0440\u0430 \u0432 \u0441\u044b\u0440\u043e\u043c METAR: {float(record.get('temperature_c')):.1f} \u00b0C")
+    raw_metar = record.get("raw_metar")
+    if raw_metar:
+        lines.append(f"\u0421\u044b\u0440\u0430\u044f \u0441\u0442\u0440\u043e\u043a\u0430: <code>{escape(str(raw_metar))}</code>")
+    return lines
 
 
 def _format_distribution_change(payload: dict, previous: dict) -> list[str]:

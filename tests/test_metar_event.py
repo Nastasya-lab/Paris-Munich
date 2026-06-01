@@ -88,10 +88,15 @@ def test_metar_event_logs_new_metar_and_compares_probabilities(tmp_path, monkeyp
     assert result["comparison_to_previous"]["deltas"]["ge_25_delta"] == 0.2
     assert result["comparison_to_previous"]["current"]["probabilities_by_integer_c"]["23"] == 0.6
     assert result["comparison_to_previous"]["previous"]["probabilities_by_integer_c"]["22"] == 0.8
+    assert result["latest_metar_record"]["raw_metar"] == "METAR EDDM 010820Z AUTO 23005KT CAVOK 20/12 Q1015 NOSIG"
+    assert result["latest_metar_record"]["temperature_c"] == 20.0
     assert result["notification_needed"] is True
     assert result["notification_sent"] is True
     assert "expected_tmax_changed" in result["notification_reasons"]
     assert "METAR" in sent["text"]
+    assert "Использованный METAR" in sent["text"]
+    assert "Температура в сыром METAR: 20.0 °C" in sent["text"]
+    assert "METAR EDDM 010820Z" in sent["text"]
 
 
 def test_should_notify_metar_event_includes_probability_and_shadow_changes():
@@ -146,7 +151,17 @@ def test_should_notify_metar_event_sends_routine_new_report_when_changes_are_sma
 def _write_metar(root, timestamp: str) -> None:
     path = root / "data" / "forecasts" / "awc_metar_live_EDDM.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"observation_time_utc": [timestamp], "raw_record_hash": [timestamp]}).to_parquet(path, index=False)
+    pd.DataFrame(
+        {
+            "observation_time_utc": [timestamp],
+            "knowledge_time_utc": [timestamp],
+            "raw_metar": [f"METAR EDDM {pd.Timestamp(timestamp).strftime('%d%H%MZ')} AUTO 23005KT CAVOK 20/12 Q1015 NOSIG"],
+            "temperature_c": [20.0],
+            "dewpoint_c": [12.0],
+            "source_id": ["awc.metar.live.EDDM"],
+            "raw_record_hash": [timestamp],
+        }
+    ).to_parquet(path, index=False)
 
 
 def _components() -> dict:
