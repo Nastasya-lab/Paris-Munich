@@ -69,18 +69,19 @@ def run_metar_event_cycle(
             "notification_sent": False,
         }
 
+    effective_issue_time_utc = _effective_issue_time(issue_time_utc, latest_metar_record)
     previous_record = _latest_forecast_record(forecast_log_path, airport=airport, target_date_local=target_date_local)
     result = run_prediction(
         airport=airport,
         target_date_local=target_date_local,
-        issue_time_utc=issue_time_utc,
+        issue_time_utc=effective_issue_time_utc,
         log=log,
         mode="metar_event",
     )
     payload = operational_prediction_payload(
         airport=airport,
         target_date_local=target_date_local,
-        issue_time_utc=issue_time_utc,
+        issue_time_utc=effective_issue_time_utc,
         result=result,
     )
     payload["refresh_summary"] = refresh_summary
@@ -94,7 +95,8 @@ def run_metar_event_cycle(
         "status": "new_metar_forecast",
         "airport": airport,
         "target_date_local": target_date_local.isoformat(),
-        "issue_time_utc": issue_time_utc.isoformat(),
+        "issue_time_utc": effective_issue_time_utc.isoformat(),
+        "requested_issue_time_utc": issue_time_utc.isoformat(),
         "previous_metar_time_utc": None if before_metar is None else before_metar.isoformat(),
         "latest_metar_time_utc": after_metar.isoformat(),
         "latest_metar_record": latest_metar_record,
@@ -211,12 +213,22 @@ def _latest_metar_record(root: Path, airport: str) -> dict[str, Any] | None:
     fields = {
         "observation_time_utc": row.get("observation_time_utc"),
         "knowledge_time_utc": row.get("knowledge_time_utc"),
+        "ingest_time_utc": row.get("ingest_time_utc"),
         "temperature_c": row.get("temperature_c"),
         "dewpoint_c": row.get("dewpoint_c"),
         "raw_metar": row.get("raw_metar"),
         "source_id": row.get("source_id"),
     }
     return {key: _json_safe_value(value) for key, value in fields.items() if _json_safe_value(value) is not None}
+
+
+def _effective_issue_time(issue_time_utc: datetime, latest_metar_record: dict[str, Any] | None) -> datetime:
+    candidates = [pd.Timestamp(issue_time_utc)]
+    for key in ("knowledge_time_utc", "ingest_time_utc"):
+        value = (latest_metar_record or {}).get(key)
+        if value is not None:
+            candidates.append(pd.Timestamp(value))
+    return max(timestamp.tz_convert("UTC") if timestamp.tzinfo else timestamp.tz_localize("UTC") for timestamp in candidates).to_pydatetime()
 
 
 def _json_safe_value(value: Any) -> Any:

@@ -37,6 +37,7 @@ def test_awc_metar_adapter_parses_json(monkeypatch):
     assert len(df) == 1
     assert df.iloc[0]["source_id"] == "awc.metar.live.EDDM"
     assert df.iloc[0]["temperature_c"] == 18
+    assert df.iloc[0]["knowledge_time_utc"] == df.iloc[0]["ingest_time_utc"]
 
 
 def test_awc_metar_adapter_can_request_recent_hours(monkeypatch):
@@ -94,6 +95,7 @@ def test_awc_taf_adapter_parses_json(monkeypatch):
     assert len(df) == 1
     assert df.iloc[0]["source_id"] == "awc.taf.live.EDDM"
     assert df.iloc[0]["taf_tx_c"] == 24
+    assert df.iloc[0]["knowledge_time_utc"] == df.iloc[0]["ingest_time_utc"]
 
 
 def test_parse_awc_epoch_seconds():

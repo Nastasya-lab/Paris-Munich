@@ -148,6 +148,18 @@ def test_should_notify_metar_event_sends_routine_new_report_when_changes_are_sma
     assert reasons == ["routine_new_metar_update"]
 
 
+def test_effective_issue_time_includes_new_live_metar_knowledge_time():
+    requested = datetime(2026, 6, 1, 13, 54, tzinfo=timezone.utc)
+    record = {
+        "knowledge_time_utc": "2026-06-01T13:54:05+00:00",
+        "ingest_time_utc": "2026-06-01T13:54:05+00:00",
+    }
+
+    effective = metar_event._effective_issue_time(requested, record)
+
+    assert effective == datetime(2026, 6, 1, 13, 54, 5, tzinfo=timezone.utc)
+
+
 def _write_metar(root, timestamp: str) -> None:
     path = root / "data" / "forecasts" / "awc_metar_live_EDDM.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)

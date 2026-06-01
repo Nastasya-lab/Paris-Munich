@@ -73,3 +73,23 @@ def test_refresh_frame_normalizes_mixed_awc_visibility_types():
     assert str(normalized["visibility"].dtype) == "string"
     assert pd.isna(normalized.iloc[1]["wind_direction_deg"])
     assert normalized.iloc[0]["temperature_c"] == 18
+
+
+def test_awc_append_dedup_preserves_first_ingest_time(tmp_path):
+    path = tmp_path / "awc_metar.parquet"
+    first_ingest = datetime(2026, 6, 1, 12, 24, tzinfo=timezone.utc)
+    later_ingest = datetime(2026, 6, 1, 12, 25, tzinfo=timezone.utc)
+    refresh_module._append_dedup(
+        pd.DataFrame({"raw_record_hash": ["h1"], "ingest_time_utc": [first_ingest], "knowledge_time_utc": [first_ingest]}),
+        path,
+    )
+    refresh_module._append_dedup(
+        pd.DataFrame({"raw_record_hash": ["h1"], "ingest_time_utc": [later_ingest], "knowledge_time_utc": [later_ingest]}),
+        path,
+    )
+
+    out = pd.read_parquet(path)
+
+    assert len(out) == 1
+    assert pd.Timestamp(out.iloc[0]["ingest_time_utc"]) == pd.Timestamp(first_ingest)
+    assert pd.Timestamp(out.iloc[0]["knowledge_time_utc"]) == pd.Timestamp(first_ingest)

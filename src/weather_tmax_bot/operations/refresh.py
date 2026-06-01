@@ -76,7 +76,9 @@ def _append_dedup(rows: pd.DataFrame, path: Path) -> None:
             rows = rows.sort_values("ingest_time_utc")
         subset = [col for col in ("raw_record_hash",) if col in rows.columns]
         if subset:
-            rows = rows.drop_duplicates(subset=subset, keep="last")
+            # Preserve the earliest operational retrieval: it is the true
+            # knowledge time for an unchanged live report.
+            rows = rows.drop_duplicates(subset=subset, keep="first")
     rows = _normalize_refresh_frame(rows)
     write_parquet(rows, path)
 

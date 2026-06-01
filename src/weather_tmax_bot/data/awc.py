@@ -7,7 +7,6 @@ import requests
 
 from weather_tmax_bot.data.metar import parse_metar
 from weather_tmax_bot.data.taf import parse_taf
-from weather_tmax_bot.temporal.availability import metar_knowledge_time, taf_knowledge_time
 from weather_tmax_bot.utils.hashing import stable_hash, text_hash
 
 
@@ -46,7 +45,10 @@ class AWCAdapter:
                 {
                     "station": item.get("icaoId", airport),
                     "observation_time_utc": obs_dt,
-                    "knowledge_time_utc": metar_knowledge_time(obs_dt),
+                    # Live AWC retrieval gives us the actual earliest time this
+                    # bot knew the report. Historical archives still use the
+                    # conservative latency assumption.
+                    "knowledge_time_utc": ingest,
                     "ingest_time_utc": ingest,
                     "source_id": f"awc.metar.live.{airport}",
                     "source_version": "awc.api.data.metar.json",
@@ -95,7 +97,7 @@ class AWCAdapter:
                 {
                     "station": item.get("icaoId", airport),
                     "issue_time_utc": issue_dt,
-                    "knowledge_time_utc": taf_knowledge_time(issue_dt),
+                    "knowledge_time_utc": ingest,
                     "valid_from_utc": None if pd.isna(valid_from) else valid_from.floor("s").to_pydatetime(),
                     "valid_to_utc": None if pd.isna(valid_to) else valid_to.floor("s").to_pydatetime(),
                     "ingest_time_utc": ingest,
