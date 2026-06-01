@@ -86,6 +86,16 @@ def refresh_pending_truth(
     adapter = adapter_factory()
     fetched = adapter.fetch_observations(airport=airport, start=start, end=end, station_id=station_id)
     merged = _merge_observations(observation_path, fetched)
+    if merged.empty:
+        summary.update(
+            {
+                "fetched_rows": len(fetched),
+                "merged_observation_rows": 0,
+                "target_rows": _rows(target_path),
+                "refresh_status": "no_observations_available",
+            }
+        )
+        return summary
     write_parquet(merged, observation_path)
     target = build_daily_tmax(merged, airport_icao=airport)
     write_parquet(target, target_path)
@@ -122,6 +132,11 @@ def refresh_pending_truth(
         }
     )
     return summary
+
+
+def _rows(path: str | Path) -> int:
+    p = Path(path)
+    return 0 if not p.exists() else len(pd.read_parquet(p))
 
 
 def _merge_observations(observation_path: str | Path, new_rows: pd.DataFrame) -> pd.DataFrame:

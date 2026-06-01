@@ -16,3 +16,11 @@ def test_daily_tmax_uses_local_day():
     out = build_daily_tmax(obs)
     row = out[out["target_date_local"] == "2026-07-15"].iloc[0]
     assert row["tmax_c"] == 25.0
+
+
+def test_daily_tmax_handles_empty_observations():
+    out = build_daily_tmax(pd.DataFrame())
+
+    assert out.empty
+    assert "target_date_local" in out.columns
+    assert "tmax_c" in out.columns

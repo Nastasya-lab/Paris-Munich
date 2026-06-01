@@ -135,3 +135,48 @@ def test_refresh_pending_truth_fetch_merges_target_and_outcomes(tmp_path):
     assert summary["forecast_monitoring_rows"] == 1
     assert pd.read_parquet(monitoring_path).iloc[0]["actual_tmax_c"] == 25.0
     assert (reports_dir / "operational_by_model.parquet").exists()
+
+
+def test_refresh_pending_truth_fetch_handles_empty_observation_response(tmp_path):
+    log_path = tmp_path / "forecast_log.jsonl"
+    obs_path = tmp_path / "obs.parquet"
+    target_path = tmp_path / "daily_target.parquet"
+    log_path.write_text(
+        json.dumps(
+            {
+                "forecast_id": "f1",
+                "airport": "EDDM",
+                "issue_time_utc": "2026-07-15T06:00:00+00:00",
+                "target_date_local": "2026-07-15",
+                "model_version": "m1",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    existing_target = pd.DataFrame(
+        {
+            "airport_icao": ["EDDM"],
+            "target_date_local": ["2026-07-14"],
+            "tmax_c": [23.0],
+            "quality_flags": ["ok"],
+        }
+    )
+    existing_target.to_parquet(target_path, index=False)
+
+    class EmptyDWDAdapter:
+        def fetch_observations(self, airport, start, end, station_id):
+            return pd.DataFrame()
+
+    summary = refresh_pending_truth(
+        forecast_log_path=log_path,
+        observation_path=obs_path,
+        target_path=target_path,
+        fetch=True,
+        as_of_date=date(2026, 7, 17),
+        adapter_factory=EmptyDWDAdapter,
+    )
+
+    assert summary["refresh_status"] == "no_observations_available"
+    assert summary["target_rows"] == 1
+    assert pd.read_parquet(target_path).equals(existing_target)
