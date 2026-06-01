@@ -2,15 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
+from weather_tmax_bot.evaluation.intraday_survival_prior import (
+    adjust_upside_probability,
+    build_daily_first_metar_max,
+    build_seasonal_hourly_survival_table,
+    lookup_survival_prior,
+)
 from weather_tmax_bot.models.distribution import TmaxDistribution
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
+DEFAULT_METAR_SURVIVAL_SOURCE = Path("data/interim/metar_iem_EDDM.parquet")
+SHADOW_SURVIVAL_FORMULA = "cap_blend"
+SHADOW_SURVIVAL_STRENGTH = 0.75
+SHADOW_SURVIVAL_MIN_LOCAL_HOUR = 17.0
 NWP_LOCAL_TEMP_COLUMNS = {
     8: "model_temp_at_08_local",
     11: "model_temp_at_11_local",
@@ -50,6 +61,7 @@ def apply_intraday_update(
     daily_target_path: str | Path = "data/processed/daily_target.parquet",
     training_frame: pd.DataFrame | None = None,
     daily_target_frame: pd.DataFrame | None = None,
+    survival_prior_frame: pd.DataFrame | None = None,
     min_rows: int = 40,
     blend_weight_profile: str = "production",
 ) -> IntradayUpdateResult:
@@ -130,6 +142,15 @@ def apply_intraday_update(
         drop_from_max=drop_from_max,
     )
     final_dist = _blend_distributions(base_distribution, intraday_dist, blend_weight).truncate_below(observed_max)
+    survival_metadata = {}
+    if blend_weight_profile == "seasonal_shadow":
+        final_dist, survival_metadata = _apply_shadow_survival_prior(
+            final_dist,
+            target_date=target_date,
+            local_hour=local_hour,
+            observed_max=observed_max,
+            survival_prior_frame=survival_prior_frame,
+        )
 
     details.update(
         {
@@ -146,6 +167,7 @@ def apply_intraday_update(
             "nwp_future_upside_c": nwp_future_upside,
             "intraday_blend_weight": blend_weight,
             **blend_metadata,
+            **survival_metadata,
             "intraday_model": _compact_payload(intraday_dist),
         }
     )
@@ -351,6 +373,60 @@ def _seasonal_shadow_utc_group(issue_hour_utc: int) -> str:
     if issue_hour_utc < 15:
         return "utc_12"
     return "utc_15_18"
+
+
+def _apply_shadow_survival_prior(
+    distribution: TmaxDistribution,
+    *,
+    target_date: date,
+    local_hour: float,
+    observed_max: float,
+    survival_prior_frame: pd.DataFrame | None = None,
+) -> tuple[TmaxDistribution, dict]:
+    metadata = {
+        "survival_adjustment_active": False,
+        "survival_adjustment_formula": SHADOW_SURVIVAL_FORMULA,
+        "survival_adjustment_strength": SHADOW_SURVIVAL_STRENGTH,
+        "survival_adjustment_min_local_hour": SHADOW_SURVIVAL_MIN_LOCAL_HOUR,
+    }
+    if local_hour < SHADOW_SURVIVAL_MIN_LOCAL_HOUR:
+        metadata["survival_adjustment_reason"] = "before_min_local_hour"
+        return distribution, metadata
+    table = survival_prior_frame if survival_prior_frame is not None else _load_default_survival_prior_table()
+    if table.empty:
+        metadata["survival_adjustment_reason"] = "survival_prior_unavailable"
+        return distribution, metadata
+
+    prior = lookup_survival_prior(table, month=target_date.month, local_hour=local_hour)
+    adjustment = adjust_upside_probability(
+        distribution,
+        observed_max_so_far_c=observed_max,
+        survival_prior=prior,
+        formula=SHADOW_SURVIVAL_FORMULA,
+        strength=SHADOW_SURVIVAL_STRENGTH,
+    )
+    metadata.update(
+        {
+            "survival_adjustment_active": True,
+            "survival_adjustment_reason": "local_ge17_cap_blend_applied",
+            "seasonal_survival_prior": float(prior),
+            "survival_original_upside_probability": adjustment.original_upside_probability,
+            "survival_adjusted_upside_probability": adjustment.adjusted_upside_probability,
+            "survival_observed_max_bin_c": adjustment.observed_max_bin_c,
+        }
+    )
+    return adjustment.distribution, metadata
+
+
+@lru_cache(maxsize=1)
+def _load_default_survival_prior_table() -> pd.DataFrame:
+    if not DEFAULT_METAR_SURVIVAL_SOURCE.exists():
+        return pd.DataFrame()
+    metar = pd.read_parquet(DEFAULT_METAR_SURVIVAL_SOURCE)
+    daily = build_daily_first_metar_max(metar)
+    if daily.empty:
+        return pd.DataFrame()
+    return build_seasonal_hourly_survival_table(daily, train_before=date(2026, 1, 1))
 
 
 def _nwp_future_max_from_feature_row(feature_row: dict, local_hour: float) -> float:

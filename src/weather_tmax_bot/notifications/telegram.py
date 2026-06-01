@@ -319,6 +319,15 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
                 f"P(Tmax ≥ 30 °C): {float((shadow_final.get('threshold_probabilities') or {}).get('ge_30', 0.0)):.1%}",
             ]
         )
+        if shadow_intraday.get("survival_adjustment_active"):
+            lines.extend(
+                [
+                    "Сезонная поправка после 17:00: <b>активна</b>",
+                    f"Историческая вероятность нового пика: {float(shadow_intraday.get('seasonal_survival_prior', 0.0)):.1%}",
+                    f"Вероятность повышения до поправки: {float(shadow_intraday.get('survival_original_upside_probability', 0.0)):.1%}",
+                    f"После поправки cap_blend × {float(shadow_intraday.get('survival_adjustment_strength', 0.0)):.2f}: <b>{float(shadow_intraday.get('survival_adjusted_upside_probability', 0.0)):.1%}</b>",
+                ]
+            )
     if reasons:
         lines.extend(["", "<b>Почему отправлено</b>", ", ".join(_translate_reason(reason) for reason in reasons)])
     lines.extend(

@@ -189,6 +189,57 @@ def test_seasonal_shadow_activates_late_drop_override(tmp_path):
     assert shadow.details["intraday_blend_weight"] == 0.95
 
 
+def test_seasonal_shadow_applies_late_survival_prior_without_changing_production(tmp_path):
+    training = _training_frame(issue_hour=15, month=8, future_increase=2.0, observed_max=23, last_temp=23)
+    timing = _timing_frame(month=8, tmax_hour=15)
+    survival = pd.DataFrame(
+        [
+            {
+                "season": "summer_JJA",
+                "local_hour": 17,
+                "training_days": 552,
+                "peak_ahead_days": 16,
+                "survival_prior": 0.03,
+            }
+        ]
+    )
+    base = TmaxDistribution([23, 24, 25], [0.50, 0.30, 0.20])
+    feature_row = {
+        "month": 8,
+        "observed_max_so_far_from_metar": 23.0,
+        "last_metar_temp_c": 23.0,
+        "temp_trend_3h": 0.0,
+    }
+
+    production = apply_intraday_update(
+        base,
+        feature_row,
+        date(2025, 8, 15),
+        datetime(2025, 8, 15, 15, 0, tzinfo=timezone.utc),
+        training_frame=training,
+        daily_target_frame=timing,
+        survival_prior_frame=survival,
+    )
+    shadow = apply_intraday_update(
+        base,
+        feature_row,
+        date(2025, 8, 15),
+        datetime(2025, 8, 15, 15, 0, tzinfo=timezone.utc),
+        training_frame=training,
+        daily_target_frame=timing,
+        survival_prior_frame=survival,
+        blend_weight_profile="seasonal_shadow",
+    )
+
+    assert production.details["shadow_mode"] is False
+    assert "survival_adjustment_active" not in production.details
+    assert shadow.details["survival_adjustment_active"] is True
+    assert shadow.details["survival_adjustment_strength"] == 0.75
+    assert shadow.details["seasonal_survival_prior"] == 0.03
+    assert shadow.details["survival_adjusted_upside_probability"] < shadow.details["survival_original_upside_probability"]
+    assert shadow.distribution.threshold_ge(24) < production.distribution.threshold_ge(24)
+
+
 def _write_training(path, *, issue_hour: int, month: int, future_increase: float, observed_max: float, last_temp: float) -> None:
     _training_frame(
         issue_hour=issue_hour,
