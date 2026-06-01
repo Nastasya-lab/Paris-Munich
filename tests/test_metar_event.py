@@ -117,6 +117,30 @@ def test_should_notify_metar_event_includes_probability_and_shadow_changes():
     assert "shadow_differs_from_champion" in reasons
 
 
+def test_should_notify_metar_event_sends_routine_new_report_when_changes_are_small():
+    payload = {
+        "forecast_components": {
+            "intraday_update": {"drop_from_observed_max_c": 0.0, "peak_passed_probability": 0.1},
+            "shadow_mode": {"comparison_to_champion": {"expected_tmax_delta_c": 0.2}},
+        }
+    }
+    comparison = {
+        "has_previous": True,
+        "deltas": {
+            "expected_tmax_delta_c": 0.1,
+            "most_likely_integer_changed": False,
+            "ge_20_delta": 0.01,
+            "ge_25_delta": 0.01,
+            "ge_30_delta": 0.01,
+        },
+    }
+
+    should_notify, reasons = metar_event.should_notify_metar_event(payload, comparison)
+
+    assert should_notify is True
+    assert reasons == ["routine_new_metar_update"]
+
+
 def _write_metar(root, timestamp: str) -> None:
     path = root / "data" / "forecasts" / "awc_metar_live_EDDM.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)

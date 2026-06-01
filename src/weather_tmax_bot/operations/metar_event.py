@@ -32,12 +32,12 @@ def run_metar_event_cycle(
     root: str | Path = ".",
     forecast_log_path: str | Path = "data/logs/forecast_log.jsonl",
 ) -> dict:
-    """Refresh live METAR and emit an intraday update only when useful.
+    """Refresh live METAR and emit an intraday update for every new report.
 
     This is intentionally separate from the ICON/NWP scheduled cycle. It is a
     light polling job: no new METAR means no forecast, no log row, and no chat
-    noise. A new METAR is always logged for later analysis, while Telegram is
-    gated by material forecast changes.
+    noise. A new METAR is always logged and, when notifications are enabled,
+    sent to Telegram so the intraday probability path is visible.
     """
     root = Path(root)
     forecast_log_path = Path(os.getenv("WEATHER_TMAX_FORECAST_LOG_PATH", str(forecast_log_path)))
@@ -174,7 +174,9 @@ def should_notify_metar_event(
     shadow_gap = abs(float((shadow.get("comparison_to_champion") or {}).get("expected_tmax_delta_c") or 0.0))
     if shadow_gap >= thresholds["shadow_expected_gap_c"]:
         reasons.append("shadow_differs_from_champion")
-    return bool(reasons), sorted(set(reasons))
+    if not reasons:
+        reasons.append("routine_new_metar_update")
+    return True, sorted(set(reasons))
 
 
 def _latest_metar_time(root: Path, airport: str) -> pd.Timestamp | None:
