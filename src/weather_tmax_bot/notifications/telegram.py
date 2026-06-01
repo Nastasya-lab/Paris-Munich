@@ -216,6 +216,7 @@ def _format_shadow_summary(components: dict) -> list[str]:
             f"Не ниже +30 °C: {float(thresholds.get('ge_30', 0.0)):.1%} ({_signed_pct(comparison.get('ge_30_probability_delta'))})",
         ]
     )
+    lines.extend(_format_shadow_interpretation(intraday))
     if intraday.get("late_drop_override_active"):
         lines.append("Late-drop override: активен из-за сильного падения температуры после пика")
     return lines
@@ -320,6 +321,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
                 f"P(Tmax ≥ 30 °C): {float((shadow_final.get('threshold_probabilities') or {}).get('ge_30', 0.0)):.1%}",
             ]
         )
+        lines.extend(_format_shadow_interpretation(shadow_intraday))
         if shadow_intraday.get("survival_adjustment_active"):
             lines.extend(
                 [
@@ -340,6 +342,35 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
         ]
     )
     return "\n".join(lines)
+
+
+def _format_shadow_interpretation(intraday: dict) -> list[str]:
+    if not intraday:
+        return []
+    phase = str(intraday.get("forecast_phase") or "")
+    scenario = str(intraday.get("scenario_tracking") or "")
+    phase_labels = {
+        "morning_prior": "Интерпретация: утренний prior, текущий METAR не должен слишком рано закрывать потенциал дневного прогрева.",
+        "midday_update": "Интерпретация: дневное уточнение, METAR уже важен, но ICON/TAF еще могут оставить апсайд.",
+        "late_nowcast": "Интерпретация: поздний nowcast, наблюдения и история времени пика получают высокий вес.",
+    }
+    scenario_labels = {
+        "temporary_disruption_possible": "Сценарий: возможный временный погодный сбой, после которого прогрев еще возможен.",
+        "heating_cutoff_likely": "Сценарий: вероятное завершение прогрева или прохождение дневного пика.",
+        "multi_source_adverse_weather": "Сценарий: METAR, TAF и ICON одновременно указывают на неблагоприятную погоду.",
+        "taf_and_metar_adverse": "Сценарий: TAF и METAR согласованно показывают неблагоприятную погоду.",
+        "nwp_still_supports_higher_tmax": "Сценарий: ICON еще поддерживает более высокий максимум.",
+        "near_observed_track": "Сценарий: день идет близко к текущей наблюдаемой траектории.",
+    }
+    lines = []
+    if phase in phase_labels:
+        lines.append(phase_labels[phase])
+    if scenario in scenario_labels:
+        lines.append(scenario_labels[scenario])
+    if intraday.get("nwp_adverse_weather_signal"):
+        components = ", ".join(str(item) for item in intraday.get("nwp_adverse_weather_components", [])) or "есть"
+        lines.append(f"ICON adverse-weather signal: {escape(components)}")
+    return lines
 
 
 def _signed_pp(value: Any) -> str:

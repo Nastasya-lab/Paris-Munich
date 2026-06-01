@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from weather_tmax_bot.evaluation.promotion_gate import evaluate_shadow_promotion_gate
+
 
 def build_outcome_analysis(
     monitoring_path: str | Path = "data/reports/forecast_monitoring.parquet",
@@ -23,9 +25,17 @@ def build_outcome_analysis(
         variants = pd.read_parquet(variant_path)
         analysis["by_forecast_variant"] = _variant_analysis(variants)
         analysis["champion_vs_shadow"] = _champion_shadow_pair_analysis(variants)
+        analysis["by_variant_phase"] = _variant_context_analysis(variants, ["forecast_variant", "forecast_phase"])
+        analysis["by_variant_scenario"] = _variant_context_analysis(variants, ["forecast_variant", "scenario_tracking"])
+        analysis["by_variant_local_hour"] = _variant_local_hour_analysis(variants)
+        analysis["shadow_promotion_gate"] = evaluate_shadow_promotion_gate(variants)
     else:
         analysis["by_forecast_variant"] = []
         analysis["champion_vs_shadow"] = {}
+        analysis["by_variant_phase"] = []
+        analysis["by_variant_scenario"] = []
+        analysis["by_variant_local_hour"] = []
+        analysis["shadow_promotion_gate"] = evaluate_shadow_promotion_gate(pd.DataFrame())
     if output_json_path is not None:
         output = Path(output_json_path)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +70,23 @@ def format_outcome_analysis_markdown(analysis: dict) -> str:
     if pair:
         lines.extend(["", "## Champion vs shadow paired score", ""])
         lines.extend(f"- `{key}`: `{value}`" for key, value in pair.items())
+    gate = analysis.get("shadow_promotion_gate", {}) or {}
+    lines.extend(["", "## Shadow promotion gate", ""])
+    lines.extend(
+        [
+            f"- `status`: `{gate.get('status')}`",
+            f"- `shadow_version`: `{gate.get('shadow_version')}`",
+            f"- `recommendation`: `{gate.get('recommendation')}`",
+        ]
+    )
+    if gate.get("checks"):
+        lines.extend(f"- `{key}`: `{value}`" for key, value in gate.get("checks", {}).items())
+    lines.extend(["", "## By variant phase", ""])
+    lines.extend(_table_lines(analysis.get("by_variant_phase", [])))
+    lines.extend(["", "## By variant scenario", ""])
+    lines.extend(_table_lines(analysis.get("by_variant_scenario", [])))
+    lines.extend(["", "## By variant local hour", ""])
+    lines.extend(_table_lines(analysis.get("by_variant_local_hour", [])))
     lines.extend(["", "## By forecast quality", ""])
     lines.extend(_table_lines(analysis.get("by_quality", [])))
     lines.extend(["", "## By forecast acceptance", ""])
@@ -103,6 +130,10 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         "by_model": _group_summary(df, ["model_version"]),
         "by_forecast_variant": [],
         "champion_vs_shadow": {},
+        "by_variant_phase": [],
+        "by_variant_scenario": [],
+        "by_variant_local_hour": [],
+        "shadow_promotion_gate": evaluate_shadow_promotion_gate(pd.DataFrame()),
         "by_quality": _group_summary(df, ["forecast_quality_status"]),
         "by_acceptance": _group_summary(df, ["forecast_accepted"]),
         "by_source_mismatch": _group_summary(df, ["any_source_mismatch"]),
@@ -136,6 +167,10 @@ def _empty_analysis(reason: str) -> dict:
         "by_model": [],
         "by_forecast_variant": [],
         "champion_vs_shadow": {},
+        "by_variant_phase": [],
+        "by_variant_scenario": [],
+        "by_variant_local_hour": [],
+        "shadow_promotion_gate": evaluate_shadow_promotion_gate(pd.DataFrame()),
         "by_quality": [],
         "by_acceptance": [],
         "by_source_mismatch": [],
@@ -178,6 +213,7 @@ def _variant_analysis(variants: pd.DataFrame) -> list[dict]:
     if variants.empty or "forecast_variant" not in variants.columns:
         return []
     df = variants.copy()
+    _ensure_variant_optional_columns(df)
     df["abs_error_expected_c"] = df["error_expected_c"].abs()
     grouped = (
         df.groupby("forecast_variant", dropna=False)
@@ -191,13 +227,60 @@ def _variant_analysis(variants: pd.DataFrame) -> list[dict]:
             brier_ge_25=("brier_ge_25", "mean"),
             brier_ge_30=("brier_ge_30", "mean"),
             mean_probability_actual_integer_bin=("probability_actual_integer_bin", "mean"),
+            mean_probability_above_actual_integer_bin=("probability_above_actual_integer_bin", "mean"),
+            coverage_80=("coverage_80", "mean"),
         )
         .reset_index()
     )
     return _records(grouped)
 
 
+def _variant_context_analysis(variants: pd.DataFrame, group_cols: list[str]) -> list[dict]:
+    if variants.empty or not set(group_cols).issubset(variants.columns):
+        return []
+    df = variants.copy()
+    _ensure_variant_optional_columns(df)
+    df["abs_error_expected_c"] = df["error_expected_c"].abs()
+    grouped = (
+        df.groupby(group_cols, dropna=False)
+        .agg(
+            scored_forecasts=("forecast_id", "count"),
+            mae_expected=("abs_error_expected_c", "mean"),
+            mean_nll=("nll", "mean"),
+            mean_crps=("crps", "mean"),
+            mean_false_upside_probability=("probability_above_actual_integer_bin", "mean"),
+            coverage_80=("coverage_80", "mean"),
+        )
+        .reset_index()
+    )
+    return _records(grouped)
+
+
+def _variant_local_hour_analysis(variants: pd.DataFrame) -> list[dict]:
+    if variants.empty or "local_issue_hour" not in variants.columns:
+        return []
+    df = variants.copy()
+    df["local_hour_floor"] = pd.to_numeric(df["local_issue_hour"], errors="coerce").fillna(-1).astype(int)
+    return _variant_context_analysis(df, ["forecast_variant", "local_hour_floor"])
+
+
+def _ensure_variant_optional_columns(df: pd.DataFrame) -> None:
+    defaults = {
+        "probability_above_actual_integer_bin": 0.0,
+        "coverage_80": False,
+        "forecast_phase": "unknown",
+        "scenario_tracking": "unknown",
+        "local_issue_hour": -1.0,
+    }
+    for column, default in defaults.items():
+        if column not in df.columns:
+            df[column] = default
+
+
 def _champion_shadow_pair_analysis(variants: pd.DataFrame) -> dict:
+    variants = variants.copy()
+    if "probability_above_actual_integer_bin" not in variants.columns:
+        variants["probability_above_actual_integer_bin"] = 0.0
     required = {"forecast_id", "forecast_variant", "error_expected_c", "nll", "crps", "probability_actual_integer_bin"}
     if variants.empty or not required.issubset(variants.columns):
         return {}
@@ -208,7 +291,7 @@ def _champion_shadow_pair_analysis(variants: pd.DataFrame) -> dict:
     pivot = df.pivot_table(
         index="forecast_id",
         columns="forecast_variant",
-        values=["abs_error_expected_c", "nll", "crps", "probability_actual_integer_bin"],
+        values=["abs_error_expected_c", "nll", "crps", "probability_actual_integer_bin", "probability_above_actual_integer_bin"],
         aggfunc="first",
     )
     if ("abs_error_expected_c", "production_champion") not in pivot or ("abs_error_expected_c", "shadow_seasonal_intraday") not in pivot:
@@ -224,6 +307,8 @@ def _champion_shadow_pair_analysis(variants: pd.DataFrame) -> dict:
     shadow_crps = paired[("crps", "shadow_seasonal_intraday")]
     champion_prob = paired[("probability_actual_integer_bin", "production_champion")]
     shadow_prob = paired[("probability_actual_integer_bin", "shadow_seasonal_intraday")]
+    champion_upside = paired[("probability_above_actual_integer_bin", "production_champion")]
+    shadow_upside = paired[("probability_above_actual_integer_bin", "shadow_seasonal_intraday")]
     return {
         "paired_forecasts": int(len(paired)),
         "shadow_mae_win_rate": float((shadow_abs < champion_abs).mean()),
@@ -234,6 +319,7 @@ def _champion_shadow_pair_analysis(variants: pd.DataFrame) -> dict:
         "mean_shadow_minus_champion_nll": float((shadow_nll - champion_nll).mean()),
         "mean_shadow_minus_champion_crps": float((shadow_crps - champion_crps).mean()),
         "mean_shadow_minus_champion_actual_bin_probability": float((shadow_prob - champion_prob).mean()),
+        "mean_shadow_minus_champion_false_upside_probability": float((shadow_upside - champion_upside).mean()),
     }
 
 

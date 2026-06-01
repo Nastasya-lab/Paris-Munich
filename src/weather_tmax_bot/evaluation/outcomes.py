@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, nll_integer_bin
 from weather_tmax_bot.models.distribution import TmaxDistribution
+
+LOCAL_TZ = ZoneInfo("Europe/Berlin")
 
 
 def update_forecast_outcomes(
@@ -30,7 +33,13 @@ def update_forecast_outcomes(
             continue
         actual = float(target_map[key])
         dist = _distribution_from_record(record)
-        base_row = _score_distribution_row(record, actual, dist, "production_champion")
+        base_row = _score_distribution_row(
+            record,
+            actual,
+            dist,
+            "production_champion",
+            metadata=_variant_metadata_from_record(record, "production_champion"),
+        )
         rows.append({key: value for key, value in base_row.items() if key not in {"forecast_variant", "variant_description"}})
         variant_rows.extend(_variant_rows_from_record(record, actual, champion_dist=dist))
     out = pd.DataFrame(rows)
@@ -99,13 +108,36 @@ def _distribution_from_probabilities(probabilities: dict) -> TmaxDistribution:
     return TmaxDistribution(bins, probs)
 
 
-def _score_distribution_row(record: dict, actual: float, dist: TmaxDistribution, forecast_variant: str, description: str | None = None) -> dict:
+def _score_distribution_row(
+    record: dict,
+    actual: float,
+    dist: TmaxDistribution,
+    forecast_variant: str,
+    description: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
     expected = dist.expected_tmax_c
     median = dist.median_tmax_c
+    issue_local = _issue_time_local(record.get("issue_time_utc"))
     return {
         "forecast_id": record["forecast_id"],
         "forecast_variant": forecast_variant,
         "variant_description": description,
+        "variant_version": (metadata or {}).get("variant_version"),
+        "forecast_phase": (metadata or {}).get("forecast_phase"),
+        "scenario_tracking": (metadata or {}).get("scenario_tracking"),
+        "phase_reason": (metadata or {}).get("phase_reason"),
+        "phase_season": (metadata or {}).get("phase_season"),
+        "local_issue_hour": _local_issue_hour(issue_local, metadata),
+        "issue_time_local": None if issue_local is None else issue_local.isoformat(),
+        "intraday_blend_weight": (metadata or {}).get("intraday_blend_weight"),
+        "peak_passed_probability": (metadata or {}).get("peak_passed_probability"),
+        "observed_max_so_far_c": (metadata or {}).get("observed_max_so_far_c"),
+        "drop_from_observed_max_c": (metadata or {}).get("drop_from_observed_max_c"),
+        "metar_weather_break_signal": (metadata or {}).get("metar_weather_break_signal"),
+        "taf_adverse_weather_signal": (metadata or {}).get("taf_adverse_weather_signal"),
+        "nwp_adverse_weather_signal": (metadata or {}).get("nwp_adverse_weather_signal"),
+        "nwp_future_heating_signal": (metadata or {}).get("nwp_future_heating_signal"),
         "airport": record["airport"],
         "issue_time_utc": record["issue_time_utc"],
         "target_date_local": record["target_date_local"],
@@ -123,11 +155,25 @@ def _score_distribution_row(record: dict, actual: float, dist: TmaxDistribution,
         "brier_ge_25": brier(dist.threshold_ge(25), actual >= 25),
         "brier_ge_30": brier(dist.threshold_ge(30), actual >= 30),
         "probability_actual_integer_bin": _probability_at_actual_bin(dist, actual),
+        "probability_above_actual_integer_bin": _probability_above_actual_bin(dist, actual),
+        "coverage_50": _interval_contains(dist, actual, 0.50),
+        "coverage_80": _interval_contains(dist, actual, 0.80),
+        "coverage_90": _interval_contains(dist, actual, 0.90),
+        "interval_80_width_c": _interval_width(dist, 0.80),
     }
 
 
 def _variant_rows_from_record(record: dict, actual: float, *, champion_dist: TmaxDistribution) -> list[dict]:
-    rows = [_score_distribution_row(record, actual, champion_dist, "production_champion", "Operational distribution returned to users.")]
+    rows = [
+        _score_distribution_row(
+            record,
+            actual,
+            champion_dist,
+            "production_champion",
+            "Operational distribution returned to users.",
+            metadata=_variant_metadata_from_record(record, "production_champion"),
+        )
+    ]
     metadata = record.get("raw_input_metadata", {}) or {}
     for name, payload in (metadata.get("forecast_variants", {}) or {}).items():
         if name == "production_champion":
@@ -135,11 +181,20 @@ def _variant_rows_from_record(record: dict, actual: float, *, champion_dist: Tma
         dist = _distribution_from_variant_payload(payload)
         if dist is None:
             continue
-        rows.append(_score_distribution_row(record, actual, dist, name, _variant_description(payload)))
+        rows.append(_score_distribution_row(record, actual, dist, name, _variant_description(payload), metadata=_variant_metadata(payload)))
     if not any(row["forecast_variant"] == "shadow_seasonal_intraday" for row in rows):
         fallback = _fallback_shadow_distribution(metadata)
         if fallback is not None:
-            rows.append(_score_distribution_row(record, actual, fallback, "shadow_seasonal_intraday", "Shadow distribution reconstructed from legacy forecast_components."))
+            rows.append(
+                _score_distribution_row(
+                    record,
+                    actual,
+                    fallback,
+                    "shadow_seasonal_intraday",
+                    "Shadow distribution reconstructed from legacy forecast_components.",
+                    metadata=_fallback_shadow_metadata(metadata),
+                )
+            )
     return rows
 
 
@@ -167,9 +222,70 @@ def _variant_description(payload: dict) -> str | None:
     return None
 
 
+def _variant_metadata(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    return payload.get("metadata") or {}
+
+
+def _variant_metadata_from_record(record: dict, variant_name: str) -> dict:
+    metadata = record.get("raw_input_metadata", {}) or {}
+    payload = (metadata.get("forecast_variants", {}) or {}).get(variant_name, {})
+    if payload:
+        return _variant_metadata(payload)
+    components = metadata.get("forecast_components", {}) or {}
+    if variant_name == "production_champion":
+        return components.get("intraday_update", {}) or {}
+    return {}
+
+
+def _fallback_shadow_metadata(metadata: dict) -> dict:
+    components = metadata.get("forecast_components", {}) or {}
+    shadow = components.get("shadow_mode", {}) or {}
+    details = shadow.get("intraday_update", {}) or {}
+    if shadow.get("name") and "variant_version" not in details:
+        details = {"variant_version": shadow.get("name"), **details}
+    return details
+
+
 def _probability_at_actual_bin(dist: TmaxDistribution, actual: float) -> float:
     actual_bin = int(round(actual))
     return float(dist.probabilities[dist.bins_c == actual_bin].sum())
+
+
+def _probability_above_actual_bin(dist: TmaxDistribution, actual: float) -> float:
+    actual_bin = int(round(actual))
+    return float(dist.probabilities[dist.bins_c > actual_bin].sum())
+
+
+def _interval_contains(dist: TmaxDistribution, actual: float, central_mass: float) -> bool:
+    low, high = dist.interval(central_mass)
+    return bool(low <= actual <= high)
+
+
+def _interval_width(dist: TmaxDistribution, central_mass: float) -> float:
+    low, high = dist.interval(central_mass)
+    return float(high - low)
+
+
+def _issue_time_local(value) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    if pd.isna(timestamp):
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    return timestamp.tz_convert(LOCAL_TZ)
+
+
+def _local_issue_hour(issue_local: pd.Timestamp | None, metadata: dict | None) -> float | None:
+    metadata_hour = (metadata or {}).get("local_issue_hour")
+    if metadata_hour is not None:
+        return float(metadata_hour)
+    if issue_local is None:
+        return None
+    return float(issue_local.hour + issue_local.minute / 60)
 
 
 def _iter_forecast_log(path: Path):

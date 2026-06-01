@@ -10,6 +10,7 @@ from weather_tmax_bot.evaluation.monitoring import write_monitoring_report
 from weather_tmax_bot.evaluation.outcome_analysis import build_outcome_analysis
 from weather_tmax_bot.evaluation.operational_monitoring import build_operational_monitoring_tables
 from weather_tmax_bot.evaluation.outcomes import build_forecast_outcome_status, update_forecast_outcomes
+from weather_tmax_bot.evaluation.promotion_gate import write_shadow_promotion_gate_report
 
 
 def main(report_path: str = typer.Option("data/reports/outcome_update_summary.json")):
@@ -17,6 +18,7 @@ def main(report_path: str = typer.Option("data/reports/outcome_update_summary.js
     status = build_forecast_outcome_status()
     tables = build_operational_monitoring_tables()
     outcome_analysis = build_outcome_analysis()
+    promotion_gate = write_shadow_promotion_gate_report()
     write_monitoring_report()
     write_first_analysis_report()
     summary = {
@@ -25,6 +27,7 @@ def main(report_path: str = typer.Option("data/reports/outcome_update_summary.js
         "operational_tables": {name: len(table) for name, table in tables.items()},
         "outcome_analysis_status": outcome_analysis["status"],
         "outcome_analysis_rows": outcome_analysis["rows"],
+        "shadow_promotion_gate_status": promotion_gate["status"],
     }
     output = Path(report_path)
     output.parent.mkdir(parents=True, exist_ok=True)

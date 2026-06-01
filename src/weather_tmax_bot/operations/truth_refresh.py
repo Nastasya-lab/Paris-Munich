@@ -10,6 +10,7 @@ from weather_tmax_bot.data.storage import write_parquet
 from weather_tmax_bot.evaluation.operational_monitoring import build_operational_monitoring_tables
 from weather_tmax_bot.evaluation.outcome_analysis import build_outcome_analysis
 from weather_tmax_bot.evaluation.outcomes import build_forecast_outcome_status, update_forecast_outcomes
+from weather_tmax_bot.evaluation.promotion_gate import write_shadow_promotion_gate_report
 from weather_tmax_bot.features.build_target import build_daily_tmax
 
 
@@ -99,10 +100,12 @@ def refresh_pending_truth(
     write_parquet(merged, observation_path)
     target = build_daily_tmax(merged, airport_icao=airport)
     write_parquet(target, target_path)
+    variant_monitoring_path = Path(reports_dir) / "forecast_variant_monitoring.parquet"
     monitoring = update_forecast_outcomes(
         forecast_log_path=forecast_log_path,
         target_path=target_path,
         output_path=monitoring_path,
+        variant_output_path=variant_monitoring_path,
     )
     status = build_forecast_outcome_status(
         forecast_log_path=forecast_log_path,
@@ -120,6 +123,11 @@ def refresh_pending_truth(
         output_json_path=Path(reports_dir) / "outcome_analysis.json",
         output_markdown_path="docs/outcome_analysis.md",
     )
+    promotion_gate = write_shadow_promotion_gate_report(
+        variant_monitoring_path=variant_monitoring_path,
+        json_path=Path(reports_dir) / "shadow_promotion_gate.json",
+        markdown_path="docs/shadow_promotion_gate.md",
+    )
     summary.update(
         {
             "fetched_rows": len(fetched),
@@ -129,6 +137,7 @@ def refresh_pending_truth(
             "forecast_outcome_status_rows": len(status),
             "outcome_analysis_status": outcome_analysis["status"],
             "outcome_analysis_rows": outcome_analysis["rows"],
+            "shadow_promotion_gate_status": promotion_gate["status"],
         }
     )
     return summary

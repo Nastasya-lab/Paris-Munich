@@ -78,14 +78,22 @@ def predict_best_available(
             "production_champion": {
                 "description": "Operational distribution returned to users.",
                 "distribution": dist.to_payload(),
+                "metadata": {
+                    "variant_version": "production_dynamic_v1",
+                    **intraday.details,
+                },
             },
             "base_prior": {
                 "description": "Full-day prior before same-day intraday update.",
                 "distribution": base_dist.to_payload(),
             },
             "shadow_seasonal_intraday": {
-                "description": "Shadow seasonal intraday challenger; never used as the operational forecast.",
+                "description": "Phase-aware intraday shadow challenger; never used as the operational forecast.",
                 "distribution": shadow_intraday.distribution.to_payload(),
+                "metadata": {
+                    "variant_version": "phase_aware_intraday_challenger_v3",
+                    **shadow_intraday.details,
+                },
             },
         }
         feature_row["intraday_update"] = intraday.details

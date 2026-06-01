@@ -15,6 +15,7 @@ def operational_monitoring_payload(root: str | Path = ".") -> dict:
         "acceptance": _read_table(root / "data/reports/operational_acceptance.parquet"),
         "forecast_inventory": _read_table(root / "data/reports/operational_forecast_inventory.parquet"),
         "pending_forecasts": _read_table(root / "data/reports/operational_pending_forecasts.parquet"),
+        "shadow_promotion_gate": _read_json(root / "data/reports/shadow_promotion_gate.json"),
     }
 
 
@@ -25,3 +26,9 @@ def _read_table(path: Path) -> list[dict]:
     if df.empty:
         return []
     return json.loads(df.to_json(orient="records", date_format="iso"))
+
+
+def _read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))

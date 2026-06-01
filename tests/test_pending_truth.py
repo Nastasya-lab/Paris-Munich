@@ -29,8 +29,9 @@ def test_pending_truth_cron_can_update_reports(monkeypatch):
 
     monkeypatch.setattr(pending_truth_module, "write_monitoring_report", lambda: calls.append("monitoring"))
     monkeypatch.setattr(pending_truth_module, "write_first_analysis_report", lambda: calls.append("first_analysis"))
+    monkeypatch.setattr(pending_truth_module, "write_shadow_promotion_gate_report", lambda: calls.append("promotion_gate"))
 
     result = run_pending_truth_cron(fetch=False, as_of_date=date(2026, 5, 29), update_reports=True)
 
     assert result["reports_updated"] is True
-    assert calls == ["monitoring", "first_analysis"]
+    assert calls == ["promotion_gate", "monitoring", "first_analysis"]

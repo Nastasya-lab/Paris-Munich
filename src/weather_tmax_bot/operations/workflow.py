@@ -7,6 +7,7 @@ from weather_tmax_bot.evaluation.first_analysis import write_first_analysis_repo
 from weather_tmax_bot.evaluation.monitoring import write_monitoring_report
 from weather_tmax_bot.evaluation.operational_monitoring import build_operational_monitoring_tables
 from weather_tmax_bot.evaluation.outcomes import build_forecast_outcome_status
+from weather_tmax_bot.evaluation.promotion_gate import write_shadow_promotion_gate_report
 from weather_tmax_bot.operations.predict_run import run_prediction_with_optional_refresh
 from weather_tmax_bot.operations.run_report import operational_prediction_payload, write_operational_prediction_report
 
@@ -109,6 +110,7 @@ def _update_operational_reports(
     }
     if update_reports:
         write_monitoring_report()
+        write_shadow_promotion_gate_report()
         write_first_analysis_report()
         summary["monitoring_report_updated"] = True
         summary["first_analysis_updated"] = True

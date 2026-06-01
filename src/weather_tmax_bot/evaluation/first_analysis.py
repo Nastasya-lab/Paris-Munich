@@ -40,6 +40,7 @@ def build_first_analysis(root: str | Path = ".") -> dict:
         "pending_forecasts": monitoring.get("operational_pending_forecasts", []),
         "operational_acceptance": monitoring.get("operational_acceptance", []),
         "outcome_analysis": monitoring.get("outcome_analysis", {}),
+        "shadow_promotion_gate": monitoring.get("shadow_promotion_gate", {}),
         "next_actions": _next_actions(monitoring, readiness),
     }
 
@@ -99,6 +100,7 @@ def format_first_analysis_markdown(analysis: dict) -> str:
             f"Minimum for first analysis: `{MIN_PRELIMINARY_OUTCOMES}`",
             f"Minimum for useful sample: `{MIN_USEFUL_OUTCOMES}`",
             f"Minimum for robust monitoring: `{MIN_ROBUST_OUTCOMES}`",
+            f"Shadow promotion gate: `{analysis.get('shadow_promotion_gate', {}).get('status')}`",
             "",
             "### Acceptance breakdown",
             "",
@@ -173,6 +175,13 @@ def _next_actions(monitoring: dict, readiness: dict) -> list[str]:
         actions.append("Review `docs/backtest_results.md`, PIT/reliability plots, and rolling summaries for the first model-quality analysis.")
     if int(monitoring.get("nwp_archive_rows", 0)) < 30:
         actions.append("Continue accumulating forecast-as-issued NWP before drawing strong NWP backtest conclusions.")
+    gate = monitoring.get("shadow_promotion_gate", {}) or {}
+    if gate.get("status") in {"pending", "continue_shadow_monitoring"}:
+        actions.append("Continue shadow-mode phase-aware monitoring until the promotion gate has enough paired outcomes.")
+    elif gate.get("status") == "do_not_promote_quality_gate_failed":
+        actions.append("Do not promote the phase-aware shadow candidate; inspect failed promotion-gate checks first.")
+    elif gate.get("status") == "eligible_for_manual_promotion_review":
+        actions.append("Review phase-aware shadow candidate manually before any production promotion.")
     return actions or ["No immediate blockers detected."]
 
 
