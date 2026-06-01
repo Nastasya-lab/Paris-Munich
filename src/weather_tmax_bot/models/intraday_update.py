@@ -29,19 +29,29 @@ NWP_LOCAL_TEMP_COLUMNS = {
     17: "model_temp_at_17_local",
 }
 WARM_MONTHS = frozenset({5, 6, 7, 8, 9})
-SEASONAL_SHADOW_PROFILES = {
-    "warm": {
-        "utc_00_03": 0.10,
-        "utc_06_09": 0.10,
-        "utc_12": 0.25,
-        "utc_15_18": 0.70,
-    },
-    "cool": {
-        "utc_00_03": 0.05,
-        "utc_06_09": 0.05,
-        "utc_12": 0.25,
-        "utc_15_18": 0.55,
-    },
+SEASONAL_SHADOW_WEIGHT_CURVES = {
+    "warm": (
+        (0.0, 0.00),
+        (8.0, 0.03),
+        (10.0, 0.08),
+        (12.0, 0.22),
+        (14.0, 0.45),
+        (15.5, 0.58),
+        (17.0, 0.72),
+        (19.0, 0.82),
+        (23.0, 0.88),
+    ),
+    "cool": (
+        (0.0, 0.00),
+        (8.0, 0.03),
+        (10.0, 0.10),
+        (12.0, 0.28),
+        (14.0, 0.52),
+        (15.5, 0.66),
+        (17.0, 0.78),
+        (19.0, 0.84),
+        (23.0, 0.88),
+    ),
 }
 
 
@@ -123,6 +133,12 @@ def apply_intraday_update(
         has_thunder=bool(feature_row.get("has_thunder_recent", False)),
         temp_trend_3h=_float_or_nan(feature_row.get("temp_trend_3h")),
     )
+    shadow_survival_table = pd.DataFrame()
+    shadow_survival_prior = None
+    if blend_weight_profile == "seasonal_shadow":
+        shadow_survival_table = survival_prior_frame if survival_prior_frame is not None else _load_default_survival_prior_table()
+        if not shadow_survival_table.empty:
+            shadow_survival_prior = lookup_survival_prior(shadow_survival_table, month=target_date.month, local_hour=local_hour)
 
     intraday_dist = _remaining_upside_distribution(
         observed_max=observed_max,
@@ -140,6 +156,8 @@ def apply_intraday_update(
         local_hour=local_hour,
         peak_probability=peak_probability,
         drop_from_max=drop_from_max,
+        survival_prior=shadow_survival_prior,
+        nwp_future_upside=nwp_future_upside,
     )
     final_dist = _blend_distributions(base_distribution, intraday_dist, blend_weight).truncate_below(observed_max)
     survival_metadata = {}
@@ -149,7 +167,8 @@ def apply_intraday_update(
             target_date=target_date,
             local_hour=local_hour,
             observed_max=observed_max,
-            survival_prior_frame=survival_prior_frame,
+            survival_prior_frame=shadow_survival_table,
+            survival_prior=shadow_survival_prior,
         )
 
     details.update(
@@ -338,6 +357,8 @@ def _resolve_intraday_blend_weight(
     local_hour: float,
     peak_probability: float,
     drop_from_max: float,
+    survival_prior: float | None = None,
+    nwp_future_upside: float | None = None,
 ) -> tuple[float, dict]:
     if profile == "production":
         weight = _intraday_blend_weight(local_hour=local_hour, peak_probability=peak_probability)
@@ -349,30 +370,47 @@ def _resolve_intraday_blend_weight(
         raise ValueError(f"unknown intraday blend weight profile: {profile}")
 
     season = "warm" if target_month in WARM_MONTHS else "cool"
-    group = _seasonal_shadow_utc_group(issue_hour_utc)
-    base_weight = SEASONAL_SHADOW_PROFILES[season][group]
+    base_weight = _hour_curve_weight(season=season, local_hour=local_hour)
+    late_gate = float(np.clip((local_hour - 12.0) / 5.0, 0.0, 1.0))
+    peak_component = late_gate * 0.85 * peak_probability
+    survival_component = None
+    if survival_prior is not None:
+        survival_component = late_gate * (0.25 + 0.65 * (1.0 - float(np.clip(survival_prior, 0.0, 1.0))))
+    nwp_future_component = 0.0
+    if nwp_future_upside is not None and local_hour < 13.0 and nwp_future_upside >= 3.0:
+        # Morning and late-morning showers should not make the shadow model
+        # over-trust observed maxima when NWP still has substantial heating.
+        nwp_future_component = -0.18
+    weight_candidates = [base_weight, peak_component]
+    if survival_component is not None:
+        weight_candidates.append(survival_component)
+    weight = max(weight_candidates) + nwp_future_component
     override_weight = 0.95 if season == "warm" else 0.85
-    late_drop_override = issue_hour_utc >= 12 and drop_from_max >= 5.0
-    weight = max(base_weight, override_weight) if late_drop_override else base_weight
+    late_drop_override = local_hour >= 14.0 and drop_from_max >= 5.0
+    if late_drop_override:
+        weight = max(weight, override_weight)
+    if not late_drop_override:
+        weight = float(np.clip(weight, 0.0, 0.92))
     return float(weight), {
-        "blend_weight_profile": "seasonal_intraday_challenger_v1",
+        "blend_weight_profile": "seasonal_hour_aware_challenger_v2",
         "shadow_mode": True,
         "seasonal_profile": season,
-        "seasonal_weight_group": group,
+        "seasonal_weight_group": "local_hour_curve",
         "seasonal_base_weight": float(base_weight),
+        "seasonal_survival_prior_for_weight": None if survival_prior is None else float(survival_prior),
+        "seasonal_survival_weight_component": None if survival_component is None else float(survival_component),
+        "peak_probability_weight_component": float(peak_component),
+        "nwp_future_weight_adjustment": float(nwp_future_component),
         "late_drop_override_active": bool(late_drop_override),
         "late_drop_override_weight": float(override_weight) if late_drop_override else None,
     }
 
 
-def _seasonal_shadow_utc_group(issue_hour_utc: int) -> str:
-    if issue_hour_utc < 6:
-        return "utc_00_03"
-    if issue_hour_utc < 12:
-        return "utc_06_09"
-    if issue_hour_utc < 15:
-        return "utc_12"
-    return "utc_15_18"
+def _hour_curve_weight(*, season: str, local_hour: float) -> float:
+    curve = SEASONAL_SHADOW_WEIGHT_CURVES[season]
+    hours = np.array([point[0] for point in curve], dtype=float)
+    weights = np.array([point[1] for point in curve], dtype=float)
+    return float(np.interp(local_hour, hours, weights))
 
 
 def _apply_shadow_survival_prior(
@@ -382,6 +420,7 @@ def _apply_shadow_survival_prior(
     local_hour: float,
     observed_max: float,
     survival_prior_frame: pd.DataFrame | None = None,
+    survival_prior: float | None = None,
 ) -> tuple[TmaxDistribution, dict]:
     metadata = {
         "survival_adjustment_active": False,
@@ -392,12 +431,13 @@ def _apply_shadow_survival_prior(
     if local_hour < SHADOW_SURVIVAL_MIN_LOCAL_HOUR:
         metadata["survival_adjustment_reason"] = "before_min_local_hour"
         return distribution, metadata
-    table = survival_prior_frame if survival_prior_frame is not None else _load_default_survival_prior_table()
-    if table.empty:
-        metadata["survival_adjustment_reason"] = "survival_prior_unavailable"
-        return distribution, metadata
-
-    prior = lookup_survival_prior(table, month=target_date.month, local_hour=local_hour)
+    prior = survival_prior
+    if prior is None:
+        table = survival_prior_frame if survival_prior_frame is not None else _load_default_survival_prior_table()
+        if table.empty:
+            metadata["survival_adjustment_reason"] = "survival_prior_unavailable"
+            return distribution, metadata
+        prior = lookup_survival_prior(table, month=target_date.month, local_hour=local_hour)
     adjustment = adjust_upside_probability(
         distribution,
         observed_max_so_far_c=observed_max,
