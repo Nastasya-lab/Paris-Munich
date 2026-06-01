@@ -140,6 +140,20 @@ def apply_intraday_update(
         if not shadow_survival_table.empty:
             shadow_survival_prior = lookup_survival_prior(shadow_survival_table, month=target_date.month, local_hour=local_hour)
 
+    scenario_metadata = _scenario_tracking_metadata(
+        feature_row=feature_row,
+        local_hour=local_hour,
+        drop_from_max=drop_from_max,
+        nwp_future_upside=nwp_future_upside,
+    )
+    phase_metadata = _classify_intraday_phase(
+        target_month=target_date.month,
+        local_hour=local_hour,
+        drop_from_max=drop_from_max,
+        nwp_future_upside=nwp_future_upside,
+        survival_prior=shadow_survival_prior,
+        scenario_metadata=scenario_metadata,
+    )
     intraday_dist = _remaining_upside_distribution(
         observed_max=observed_max,
         increases=candidates["future_increase_c"].to_numpy(dtype=float),
@@ -158,6 +172,7 @@ def apply_intraday_update(
         drop_from_max=drop_from_max,
         survival_prior=shadow_survival_prior,
         nwp_future_upside=nwp_future_upside,
+        phase_metadata=phase_metadata,
     )
     final_dist = _blend_distributions(base_distribution, intraday_dist, blend_weight).truncate_below(observed_max)
     survival_metadata = {}
@@ -184,6 +199,8 @@ def apply_intraday_update(
             "peak_passed_probability": peak_probability,
             "nwp_future_max_sampled_hours_c": None if np.isnan(nwp_future_max) else nwp_future_max,
             "nwp_future_upside_c": nwp_future_upside,
+            **scenario_metadata,
+            **phase_metadata,
             "intraday_blend_weight": blend_weight,
             **blend_metadata,
             **survival_metadata,
@@ -359,6 +376,7 @@ def _resolve_intraday_blend_weight(
     drop_from_max: float,
     survival_prior: float | None = None,
     nwp_future_upside: float | None = None,
+    phase_metadata: dict | None = None,
 ) -> tuple[float, dict]:
     if profile == "production":
         weight = _intraday_blend_weight(local_hour=local_hour, peak_probability=peak_probability)
@@ -391,6 +409,14 @@ def _resolve_intraday_blend_weight(
         weight = max(weight, override_weight)
     if not late_drop_override:
         weight = float(np.clip(weight, 0.0, 0.92))
+    phase = (phase_metadata or {}).get("forecast_phase")
+    if phase == "morning_prior":
+        morning_cap = 0.08 if nwp_future_upside is not None and nwp_future_upside >= 3.0 else 0.20
+        weight = min(weight, morning_cap)
+    elif phase == "midday_update":
+        weight = min(weight, 0.70)
+    elif phase == "late_nowcast":
+        weight = max(weight, 0.65)
     return float(weight), {
         "blend_weight_profile": "seasonal_hour_aware_challenger_v2",
         "shadow_mode": True,
@@ -403,6 +429,132 @@ def _resolve_intraday_blend_weight(
         "nwp_future_weight_adjustment": float(nwp_future_component),
         "late_drop_override_active": bool(late_drop_override),
         "late_drop_override_weight": float(override_weight) if late_drop_override else None,
+    }
+
+
+def _scenario_tracking_metadata(
+    *,
+    feature_row: dict,
+    local_hour: float,
+    drop_from_max: float,
+    nwp_future_upside: float | None,
+) -> dict:
+    temp_trend_3h = _float_or_nan(feature_row.get("temp_trend_3h"))
+    metar_weather_break = (
+        bool(feature_row.get("has_precip_recent", False))
+        or bool(feature_row.get("has_thunder_recent", False))
+        or drop_from_max >= 3.0
+        or (not np.isnan(temp_trend_3h) and temp_trend_3h <= -2.5)
+    )
+    taf_adverse_weather = any(
+        bool(feature_row.get(flag, False))
+        for flag in (
+            "taf_has_rain",
+            "taf_has_shower",
+            "taf_has_thunder",
+            "taf_has_fog",
+            "taf_has_snow",
+            "taf_prob30_bad_weather",
+            "taf_prob40_bad_weather",
+        )
+    )
+    nwp_future_precip = _float_or_nan(feature_row.get("model_future_precip_sum"))
+    nwp_future_cloud = _float_or_nan(feature_row.get("model_future_cloud_cover_mean"))
+    nwp_future_wind = _float_or_nan(feature_row.get("model_future_wind_speed_max"))
+    nwp_future_gust = _float_or_nan(feature_row.get("model_future_gust_max"))
+    nwp_adverse_components = []
+    if not np.isnan(nwp_future_precip) and nwp_future_precip >= 0.5:
+        nwp_adverse_components.append("future_precip")
+    if not np.isnan(nwp_future_cloud) and nwp_future_cloud >= 85.0:
+        nwp_adverse_components.append("future_cloud")
+    if not np.isnan(nwp_future_wind) and nwp_future_wind >= 35.0:
+        nwp_adverse_components.append("future_wind")
+    if not np.isnan(nwp_future_gust) and nwp_future_gust >= 50.0:
+        nwp_adverse_components.append("future_gust")
+    nwp_adverse_weather = bool(nwp_adverse_components)
+    if nwp_future_upside is None:
+        nwp_future_heating_signal = "unknown"
+    elif nwp_future_upside >= 3.0:
+        nwp_future_heating_signal = "strong_future_heating"
+    elif nwp_future_upside >= 1.0:
+        nwp_future_heating_signal = "some_future_heating"
+    else:
+        nwp_future_heating_signal = "little_future_heating"
+
+    if local_hour < 13.0 and metar_weather_break and nwp_future_upside is not None and nwp_future_upside >= 3.0:
+        scenario = "temporary_disruption_possible"
+    elif local_hour >= 14.0 and metar_weather_break and (nwp_future_upside is None or nwp_future_upside <= 1.0):
+        scenario = "heating_cutoff_likely"
+    elif metar_weather_break and taf_adverse_weather and nwp_adverse_weather:
+        scenario = "multi_source_adverse_weather"
+    elif taf_adverse_weather and metar_weather_break:
+        scenario = "taf_and_metar_adverse"
+    elif nwp_future_upside is not None and nwp_future_upside >= 2.0:
+        scenario = "nwp_still_supports_higher_tmax"
+    else:
+        scenario = "near_observed_track"
+
+    return {
+        "scenario_tracking": scenario,
+        "metar_weather_break_signal": bool(metar_weather_break),
+        "taf_adverse_weather_signal": bool(taf_adverse_weather),
+        "nwp_adverse_weather_signal": bool(nwp_adverse_weather),
+        "nwp_adverse_weather_components": nwp_adverse_components,
+        "nwp_future_heating_signal": nwp_future_heating_signal,
+        "temp_trend_3h_for_phase_c": None if np.isnan(temp_trend_3h) else float(temp_trend_3h),
+    }
+
+
+def _classify_intraday_phase(
+    *,
+    target_month: int,
+    local_hour: float,
+    drop_from_max: float,
+    nwp_future_upside: float | None,
+    survival_prior: float | None,
+    scenario_metadata: dict,
+) -> dict:
+    season = "warm" if target_month in WARM_MONTHS else "cool"
+    metar_break = bool(scenario_metadata.get("metar_weather_break_signal"))
+    nwp_adverse_weather = bool(scenario_metadata.get("nwp_adverse_weather_signal"))
+    reasons = []
+
+    if local_hour < 11.0:
+        phase = "morning_prior"
+        reasons.append("local_hour_before_11")
+        if nwp_future_upside is not None and nwp_future_upside >= 3.0:
+            reasons.append("nwp_future_heating_available")
+    else:
+        late_cutoff_signal = (
+            local_hour >= 14.0
+            and metar_break
+            and drop_from_max >= 3.0
+            and (nwp_future_upside is None or nwp_future_upside <= 1.0 or nwp_adverse_weather)
+        )
+        survival_late_signal = (
+            local_hour >= 15.5
+            and survival_prior is not None
+            and survival_prior <= 0.12
+            and (nwp_future_upside is None or nwp_future_upside <= 1.5)
+        )
+        if local_hour >= 16.0 or late_cutoff_signal or survival_late_signal:
+            phase = "late_nowcast"
+            if local_hour >= 16.0:
+                reasons.append("local_hour_ge_16")
+            if late_cutoff_signal:
+                reasons.append("metar_break_with_little_nwp_upside")
+            if survival_late_signal:
+                reasons.append("low_historical_peak_survival")
+        else:
+            phase = "midday_update"
+            reasons.append("main_heating_window")
+            if nwp_future_upside is not None and nwp_future_upside >= 1.0:
+                reasons.append("nwp_still_allows_upside")
+
+    return {
+        "forecast_phase": phase,
+        "phase_reason": ",".join(reasons),
+        "phase_season": season,
     }
 
 
@@ -470,6 +622,9 @@ def _load_default_survival_prior_table() -> pd.DataFrame:
 
 
 def _nwp_future_max_from_feature_row(feature_row: dict, local_hour: float) -> float:
+    future_max = _float_or_nan(feature_row.get("model_future_temp_max_c"))
+    if not np.isnan(future_max):
+        return float(future_max)
     values = []
     for hour, column in NWP_LOCAL_TEMP_COLUMNS.items():
         value = _float_or_nan(feature_row.get(column))

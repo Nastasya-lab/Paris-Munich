@@ -94,9 +94,44 @@ def test_seasonal_shadow_morning_keeps_intraday_weak_when_nwp_still_heats(tmp_pa
 
     assert shadow.details["blend_weight_profile"] == "seasonal_hour_aware_challenger_v2"
     assert shadow.details["local_issue_hour"] == 8.0
+    assert shadow.details["forecast_phase"] == "morning_prior"
+    assert shadow.details["scenario_tracking"] == "temporary_disruption_possible"
+    assert shadow.details["nwp_future_heating_signal"] == "strong_future_heating"
     assert shadow.details["nwp_future_weight_adjustment"] < 0
     assert shadow.details["intraday_blend_weight"] == 0.0
     assert abs(shadow.distribution.expected_tmax_c - base.expected_tmax_c) < 1e-9
+
+
+def test_seasonal_shadow_tracks_multi_source_adverse_weather(tmp_path):
+    training = _training_frame(issue_hour=10, month=8, future_increase=2.0, observed_max=23, last_temp=22)
+    timing = _timing_frame(month=8, tmax_hour=15)
+    base = TmaxDistribution([23, 24, 25, 26], [0.10, 0.30, 0.40, 0.20])
+
+    shadow = apply_intraday_update(
+        base,
+        {
+            "month": 8,
+            "observed_max_so_far_from_metar": 23.0,
+            "last_metar_temp_c": 22.0,
+            "temp_trend_3h": -3.0,
+            "has_precip_recent": True,
+            "taf_has_shower": True,
+            "model_future_temp_max_c": 25.0,
+            "model_future_precip_sum": 2.0,
+            "model_future_cloud_cover_mean": 90.0,
+        },
+        date(2025, 8, 15),
+        datetime(2025, 8, 15, 10, 0, tzinfo=timezone.utc),
+        training_frame=training,
+        daily_target_frame=timing,
+        blend_weight_profile="seasonal_shadow",
+    )
+
+    assert shadow.details["forecast_phase"] == "midday_update"
+    assert shadow.details["scenario_tracking"] == "multi_source_adverse_weather"
+    assert shadow.details["taf_adverse_weather_signal"] is True
+    assert shadow.details["nwp_adverse_weather_signal"] is True
+    assert shadow.details["nwp_adverse_weather_components"] == ["future_precip", "future_cloud"]
 
 
 def test_backtest_can_supply_train_only_frames(tmp_path):
@@ -190,6 +225,8 @@ def test_seasonal_shadow_uses_warm_profile_without_changing_production(tmp_path)
     assert shadow.details["shadow_mode"] is True
     assert shadow.details["seasonal_profile"] == "warm"
     assert shadow.details["seasonal_weight_group"] == "local_hour_curve"
+    assert shadow.details["forecast_phase"] == "midday_update"
+    assert shadow.details["scenario_tracking"] == "near_observed_track"
     assert shadow.details["intraday_blend_weight"] == 0.45
     assert shadow.details["intraday_blend_weight"] != production.details["intraday_blend_weight"]
 
@@ -216,6 +253,8 @@ def test_seasonal_shadow_activates_late_drop_override(tmp_path):
     )
 
     assert shadow.details["late_drop_override_active"] is True
+    assert shadow.details["forecast_phase"] == "late_nowcast"
+    assert shadow.details["scenario_tracking"] == "heating_cutoff_likely"
     assert shadow.details["seasonal_base_weight"] == 0.72
     assert shadow.details["intraday_blend_weight"] == 0.95
 
@@ -267,6 +306,7 @@ def test_seasonal_shadow_applies_late_survival_prior_without_changing_production
     assert shadow.details["survival_adjustment_active"] is True
     assert shadow.details["survival_adjustment_strength"] == 0.75
     assert shadow.details["seasonal_survival_prior"] == 0.03
+    assert shadow.details["forecast_phase"] == "late_nowcast"
     assert shadow.details["intraday_blend_weight"] > 0.85
     assert shadow.details["seasonal_survival_weight_component"] > shadow.details["seasonal_base_weight"]
     assert shadow.details["survival_adjusted_upside_probability"] < shadow.details["survival_original_upside_probability"]

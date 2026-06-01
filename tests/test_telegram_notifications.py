@@ -235,6 +235,7 @@ def test_metar_event_message_includes_shadow_distribution_without_deltas():
                 "shadow_mode": {
                     "intraday_update": {
                         "intraday_blend_weight": 0.1,
+                        "forecast_phase": "late_nowcast",
                         "survival_adjustment_active": True,
                         "seasonal_survival_prior": 0.03,
                         "survival_original_upside_probability": 0.25,
@@ -253,6 +254,7 @@ def test_metar_event_message_includes_shadow_distribution_without_deltas():
     )
 
     assert "Shadow-\u0441\u0446\u0435\u043d\u0430\u0440\u0438\u0439" in text
+    assert "\u0424\u0430\u0437\u0430 shadow: late_nowcast" in text
     assert "\u0420\u0430\u0441\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435: +21 \u00b0C 10.0%, +22 \u00b0C 50.0%, +23 \u00b0C 40.0%" in text
     assert "\u0421\u0435\u0437\u043e\u043d\u043d\u0430\u044f \u043f\u043e\u043f\u0440\u0430\u0432\u043a\u0430 \u043f\u043e\u0441\u043b\u0435 17:00" in text
     assert "cap_blend \u00d7 0.75" in text

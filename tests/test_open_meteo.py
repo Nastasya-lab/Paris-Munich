@@ -64,4 +64,6 @@ def test_single_run_extract_preserves_issued_run_identity(monkeypatch):
     assert rows.iloc[0]["source_id"] == "open_meteo.single_run.icon_d2"
     assert rows.iloc[0]["model_run_time_utc"] == run
     assert rows.iloc[0]["model_availability_time_utc"] == datetime(2026, 7, 15, 3, tzinfo=timezone.utc)
+    assert rows.iloc[0]["model_future_temp_max_c"] == 21
+    assert rows.iloc[0]["model_future_precip_sum"] == 0.0
     assert rows.iloc[0]["quality_flag"] == "historical_forecast_as_issued_single_run"

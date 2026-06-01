@@ -315,6 +315,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
                 "<b>Shadow-сценарий</b>",
                 f"Ожидаемый максимум: {float(shadow_final.get('expected_tmax_c', 0.0)):.1f} °C",
                 f"Вес seasonal intraday: {float(shadow_intraday.get('intraday_blend_weight', 0.0)):.1%}",
+                f"Фаза shadow: {escape(str(shadow_intraday.get('forecast_phase', 'неизвестно')))}",
                 f"Распределение: {_format_compact_bins(shadow_final.get('probabilities_by_integer_c', {}), limit=6)}",
                 f"P(Tmax ≥ 30 °C): {float((shadow_final.get('threshold_probabilities') or {}).get('ge_30', 0.0)):.1%}",
             ]

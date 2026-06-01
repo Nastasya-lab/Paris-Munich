@@ -153,6 +153,7 @@ def _aggregate_open_meteo_day(
     horizon = None
     if model_run_time_utc is not None:
         horizon = (day["valid_time_utc"].min().to_pydatetime() - model_run_time_utc).total_seconds() / 3600
+    remaining_day = day[day["valid_time_utc"] >= pd.Timestamp(model_availability_time_utc)]
     return {
         "airport_icao": airport_icao,
         "target_date_local": target_date_local.isoformat(),
@@ -175,6 +176,12 @@ def _aggregate_open_meteo_day(
         "model_pressure_mean": pd.to_numeric(day.get("surface_pressure"), errors="coerce").mean(),
         "model_dewpoint_mean": pd.to_numeric(day.get("dew_point_2m"), errors="coerce").mean(),
         "model_relative_humidity_mean": pd.to_numeric(day.get("relative_humidity_2m"), errors="coerce").mean(),
+        "model_future_temp_max_c": pd.to_numeric(remaining_day.get("temperature_2m"), errors="coerce").max(),
+        "model_future_cloud_cover_mean": pd.to_numeric(remaining_day.get("cloud_cover"), errors="coerce").mean(),
+        "model_future_precip_sum": pd.to_numeric(remaining_day.get("precipitation"), errors="coerce").sum(),
+        "model_future_shortwave_radiation_sum": pd.to_numeric(remaining_day.get("shortwave_radiation"), errors="coerce").sum(),
+        "model_future_wind_speed_max": pd.to_numeric(remaining_day.get("wind_speed_10m"), errors="coerce").max(),
+        "model_future_gust_max": pd.to_numeric(remaining_day.get("wind_gusts_10m"), errors="coerce").max(),
         "nearest_gridpoint_value": pd.to_numeric(day.get("temperature_2m"), errors="coerce").max(),
         "source_id": source_id,
         "source_version": source_version,
