@@ -124,6 +124,71 @@ def test_timing_prior_handles_mixed_dst_offsets(tmp_path):
     assert result.details["timing_peak_passed_prior"] == 1.0
 
 
+def test_seasonal_shadow_uses_warm_profile_without_changing_production(tmp_path):
+    training = _training_frame(issue_hour=12, month=8, future_increase=2.0, observed_max=25, last_temp=24)
+    timing = _timing_frame(month=8, tmax_hour=15)
+    base = TmaxDistribution([25, 26, 27, 28], [0.10, 0.30, 0.40, 0.20])
+    feature_row = {
+        "month": 8,
+        "observed_max_so_far_from_metar": 25.0,
+        "last_metar_temp_c": 24.0,
+        "temp_trend_3h": 1.0,
+    }
+
+    production = apply_intraday_update(
+        base,
+        feature_row,
+        date(2025, 8, 15),
+        datetime(2025, 8, 15, 12, 0, tzinfo=timezone.utc),
+        training_frame=training,
+        daily_target_frame=timing,
+    )
+    shadow = apply_intraday_update(
+        base,
+        feature_row,
+        date(2025, 8, 15),
+        datetime(2025, 8, 15, 12, 0, tzinfo=timezone.utc),
+        training_frame=training,
+        daily_target_frame=timing,
+        blend_weight_profile="seasonal_shadow",
+    )
+
+    assert production.details["blend_weight_profile"] == "production_dynamic_v1"
+    assert production.details["shadow_mode"] is False
+    assert shadow.details["blend_weight_profile"] == "seasonal_intraday_challenger_v1"
+    assert shadow.details["shadow_mode"] is True
+    assert shadow.details["seasonal_profile"] == "warm"
+    assert shadow.details["seasonal_weight_group"] == "utc_12"
+    assert shadow.details["intraday_blend_weight"] == 0.25
+    assert shadow.details["intraday_blend_weight"] != production.details["intraday_blend_weight"]
+
+
+def test_seasonal_shadow_activates_late_drop_override(tmp_path):
+    training = _training_frame(issue_hour=15, month=8, future_increase=0.2, observed_max=29, last_temp=18)
+    timing = _timing_frame(month=8, tmax_hour=14)
+    base = TmaxDistribution([29, 30, 31], [0.10, 0.60, 0.30])
+
+    shadow = apply_intraday_update(
+        base,
+        {
+            "month": 8,
+            "observed_max_so_far_from_metar": 29.0,
+            "last_metar_temp_c": 18.0,
+            "temp_trend_3h": -10.0,
+            "has_precip_recent": True,
+        },
+        date(2025, 8, 15),
+        datetime(2025, 8, 15, 15, 0, tzinfo=timezone.utc),
+        training_frame=training,
+        daily_target_frame=timing,
+        blend_weight_profile="seasonal_shadow",
+    )
+
+    assert shadow.details["late_drop_override_active"] is True
+    assert shadow.details["seasonal_base_weight"] == 0.70
+    assert shadow.details["intraday_blend_weight"] == 0.95
+
+
 def _write_training(path, *, issue_hour: int, month: int, future_increase: float, observed_max: float, last_temp: float) -> None:
     _training_frame(
         issue_hour=issue_hour,

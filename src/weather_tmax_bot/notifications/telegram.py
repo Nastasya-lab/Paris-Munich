@@ -87,6 +87,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
         *_format_intraday_summary(forecast.get("forecast_components", {})),
+        *_format_shadow_summary(forecast.get("forecast_components", {})),
         "",
         "<b>Данные</b>",
         *_format_freshness(refresh),
@@ -176,6 +177,68 @@ def _format_intraday_summary(components: dict) -> list[str]:
 def _format_expected(component: dict) -> str:
     value = component.get("expected_tmax_c")
     return "недоступен" if value is None else f"{float(value):.1f} °C"
+
+
+def _format_shadow_summary(components: dict) -> list[str]:
+    shadow = (components or {}).get("shadow_mode") or {}
+    if not shadow:
+        return []
+    intraday = shadow.get("intraday_update") or {}
+    final_model = shadow.get("final_model") or {}
+    comparison = shadow.get("comparison_to_champion") or {}
+    lines = [
+        "",
+        "<b>Теневой сценарий: seasonal intraday</b>",
+        "Не влияет на основной прогноз. Нужен для наглядного сравнения.",
+    ]
+    if not intraday.get("active"):
+        reason = escape(str(intraday.get("reason") or "нет причины"))
+        lines.append(f"Статус: неактивен ({reason})")
+        return lines
+
+    season = {"warm": "теплый", "cool": "холодный"}.get(
+        intraday.get("seasonal_profile"),
+        escape(str(intraday.get("seasonal_profile", "неизвестный"))),
+    )
+    interval = final_model.get("intervals", {}).get("80", [])
+    interval_text = "недоступен"
+    if len(interval) == 2:
+        interval_text = f"{float(interval[0]):.1f}...{float(interval[1]):.1f} °C"
+    thresholds = final_model.get("threshold_probabilities", {})
+    lines.extend(
+        [
+            f"Профиль: {season}, вес уточнения <b>{float(intraday.get('intraday_blend_weight', 0.0)):.1%}</b>",
+            f"Ожидаемый максимум: <b>{float(final_model.get('expected_tmax_c', 0.0)):.1f} °C</b> ({_signed_c(comparison.get('expected_tmax_delta_c'))} к основному)",
+            f"Самая вероятная корзина: <b>{int(final_model.get('most_likely_integer_c', 0))} °C</b>",
+            f"Интервал 80%: {interval_text}",
+            f"Главные корзины: {_format_compact_bins(final_model.get('probabilities_by_integer_c', {}))}",
+            f"Не ниже +25 °C: {float(thresholds.get('ge_25', 0.0)):.1%} ({_signed_pct(comparison.get('ge_25_probability_delta'))})",
+            f"Не ниже +30 °C: {float(thresholds.get('ge_30', 0.0)):.1%} ({_signed_pct(comparison.get('ge_30_probability_delta'))})",
+        ]
+    )
+    if intraday.get("late_drop_override_active"):
+        lines.append("Late-drop override: активен из-за сильного падения температуры после пика")
+    return lines
+
+
+def _format_compact_bins(probabilities: dict, limit: int = 4) -> str:
+    if not probabilities:
+        return "нет данных"
+    rows = sorted(
+        ((int(bin_c), float(probability)) for bin_c, probability in probabilities.items()),
+        key=lambda row: row[1],
+        reverse=True,
+    )[:limit]
+    rows.sort()
+    return ", ".join(f"{bin_c:+d} °C {probability:.1%}" for bin_c, probability in rows)
+
+
+def _signed_c(value: Any) -> str:
+    return "нет данных" if value is None else f"{float(value):+.1f} °C"
+
+
+def _signed_pct(value: Any) -> str:
+    return "нет данных" if value is None else f"{float(value):+.1%} к основному"
 
 
 def _format_freshness(refresh: dict) -> list[str]:

@@ -64,9 +64,18 @@ def predict_best_available(
             calibrator = load_model(calibrator_path)
             dist = calibrator.transform(dist).truncate_below(observed_max)
             warnings.append("Validation-fitted spread calibration applied.")
-        intraday = apply_intraday_update(dist, feature_row, target_date, issue_time_utc)
+        base_dist = dist
+        intraday = apply_intraday_update(base_dist, feature_row, target_date, issue_time_utc)
+        shadow_intraday = apply_intraday_update(
+            base_dist,
+            feature_row,
+            target_date,
+            issue_time_utc,
+            blend_weight_profile="seasonal_shadow",
+        )
         dist = intraday.distribution
         feature_row["intraday_update"] = intraday.details
+        feature_row["shadow_intraday_update"] = shadow_intraday.details
         feature_row["forecast_components"] = {
             "base_model": intraday.details.get("base_model"),
             "intraday_update": {
@@ -76,6 +85,17 @@ def predict_best_available(
             },
             "intraday_model": intraday.details.get("intraday_model"),
             "final_model": intraday.details.get("final_model"),
+            "shadow_mode": {
+                "name": "seasonal_intraday_challenger_v1",
+                "status": "shadow_only_does_not_affect_operational_forecast",
+                "intraday_update": {
+                    key: value
+                    for key, value in shadow_intraday.details.items()
+                    if key not in {"base_model", "intraday_model", "final_model"}
+                },
+                "final_model": shadow_intraday.details.get("final_model"),
+                "comparison_to_champion": _distribution_comparison(shadow_intraday.distribution, dist),
+            },
         }
         if intraday.details.get("active"):
             warnings.append("Intraday update applied: base prior blended with current METAR/TAF/NWP remaining-day signal.")
@@ -118,6 +138,16 @@ def _synthetic_targets() -> pd.DataFrame:
             "source_id": "synthetic.climatology.placeholder",
         }
     )
+
+
+def _distribution_comparison(challenger, champion) -> dict:
+    return {
+        "expected_tmax_delta_c": challenger.expected_tmax_c - champion.expected_tmax_c,
+        "median_tmax_delta_c": challenger.median_tmax_c - champion.median_tmax_c,
+        "most_likely_integer_delta_c": challenger.most_likely_integer_c - champion.most_likely_integer_c,
+        "ge_25_probability_delta": challenger.threshold_ge(25) - champion.threshold_ge(25),
+        "ge_30_probability_delta": challenger.threshold_ge(30) - champion.threshold_ge(30),
+    }
 
 
 def _load_optional(path: str | Path) -> pd.DataFrame:

@@ -17,6 +17,21 @@ NWP_LOCAL_TEMP_COLUMNS = {
     14: "model_temp_at_14_local",
     17: "model_temp_at_17_local",
 }
+WARM_MONTHS = frozenset({5, 6, 7, 8, 9})
+SEASONAL_SHADOW_PROFILES = {
+    "warm": {
+        "utc_00_03": 0.10,
+        "utc_06_09": 0.10,
+        "utc_12": 0.25,
+        "utc_15_18": 0.70,
+    },
+    "cool": {
+        "utc_00_03": 0.05,
+        "utc_06_09": 0.05,
+        "utc_12": 0.25,
+        "utc_15_18": 0.55,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -36,6 +51,7 @@ def apply_intraday_update(
     training_frame: pd.DataFrame | None = None,
     daily_target_frame: pd.DataFrame | None = None,
     min_rows: int = 40,
+    blend_weight_profile: str = "production",
 ) -> IntradayUpdateResult:
     """Blend a full-day prior with a same-day remaining-upside model.
 
@@ -105,7 +121,14 @@ def apply_intraday_update(
         drop_from_max=drop_from_max,
         nwp_future_upside=nwp_future_upside,
     )
-    blend_weight = _intraday_blend_weight(local_hour=local_hour, peak_probability=peak_probability)
+    blend_weight, blend_metadata = _resolve_intraday_blend_weight(
+        profile=blend_weight_profile,
+        target_month=target_date.month,
+        issue_hour_utc=issue_time_utc.hour,
+        local_hour=local_hour,
+        peak_probability=peak_probability,
+        drop_from_max=drop_from_max,
+    )
     final_dist = _blend_distributions(base_distribution, intraday_dist, blend_weight).truncate_below(observed_max)
 
     details.update(
@@ -122,6 +145,7 @@ def apply_intraday_update(
             "nwp_future_max_sampled_hours_c": None if np.isnan(nwp_future_max) else nwp_future_max,
             "nwp_future_upside_c": nwp_future_upside,
             "intraday_blend_weight": blend_weight,
+            **blend_metadata,
             "intraday_model": _compact_payload(intraday_dist),
         }
     )
@@ -282,6 +306,51 @@ def _intraday_blend_weight(*, local_hour: float, peak_probability: float) -> flo
     if local_hour < 10:
         return float(min(0.45, max(base, 0.35 * peak_probability)))
     return float(np.clip(max(base, 0.9 * peak_probability), 0.20, 0.95))
+
+
+def _resolve_intraday_blend_weight(
+    *,
+    profile: str,
+    target_month: int,
+    issue_hour_utc: int,
+    local_hour: float,
+    peak_probability: float,
+    drop_from_max: float,
+) -> tuple[float, dict]:
+    if profile == "production":
+        weight = _intraday_blend_weight(local_hour=local_hour, peak_probability=peak_probability)
+        return weight, {
+            "blend_weight_profile": "production_dynamic_v1",
+            "shadow_mode": False,
+        }
+    if profile != "seasonal_shadow":
+        raise ValueError(f"unknown intraday blend weight profile: {profile}")
+
+    season = "warm" if target_month in WARM_MONTHS else "cool"
+    group = _seasonal_shadow_utc_group(issue_hour_utc)
+    base_weight = SEASONAL_SHADOW_PROFILES[season][group]
+    override_weight = 0.95 if season == "warm" else 0.85
+    late_drop_override = issue_hour_utc >= 12 and drop_from_max >= 5.0
+    weight = max(base_weight, override_weight) if late_drop_override else base_weight
+    return float(weight), {
+        "blend_weight_profile": "seasonal_intraday_challenger_v1",
+        "shadow_mode": True,
+        "seasonal_profile": season,
+        "seasonal_weight_group": group,
+        "seasonal_base_weight": float(base_weight),
+        "late_drop_override_active": bool(late_drop_override),
+        "late_drop_override_weight": float(override_weight) if late_drop_override else None,
+    }
+
+
+def _seasonal_shadow_utc_group(issue_hour_utc: int) -> str:
+    if issue_hour_utc < 6:
+        return "utc_00_03"
+    if issue_hour_utc < 12:
+        return "utc_06_09"
+    if issue_hour_utc < 15:
+        return "utc_12"
+    return "utc_15_18"
 
 
 def _nwp_future_max_from_feature_row(feature_row: dict, local_hour: float) -> float:

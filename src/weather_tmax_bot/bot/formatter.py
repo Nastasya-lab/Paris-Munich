@@ -67,6 +67,30 @@ def format_prediction(
             )
         elif intraday.get("reason"):
             lines.append(f"- intraday reason: {intraday.get('reason')}")
+    shadow = (forecast_components or {}).get("shadow_mode") or {}
+    shadow_intraday = shadow.get("intraday_update") or {}
+    shadow_final = shadow.get("final_model") or {}
+    shadow_comparison = shadow.get("comparison_to_champion") or {}
+    if shadow:
+        lines += [
+            "",
+            "Shadow scenario: seasonal intraday challenger",
+            "- shadow only: does not affect the operational forecast",
+            f"- intraday active: {shadow_intraday.get('active')}",
+        ]
+        if shadow_intraday.get("active"):
+            lines.extend(
+                [
+                    f"- seasonal profile: {shadow_intraday.get('seasonal_profile')}",
+                    f"- intraday blend weight: {100 * float(shadow_intraday.get('intraday_blend_weight', 0.0)):.1f}%",
+                    f"- expected Tmax: {_fmt_component_expected(shadow_final)} ({_fmt_signed_c(shadow_comparison.get('expected_tmax_delta_c'))} vs champion)",
+                    f"- most likely bin: {shadow_final.get('most_likely_integer_c')}C",
+                    f"- P(Tmax >= 30C): {100 * float((shadow_final.get('threshold_probabilities') or {}).get('ge_30', 0.0)):.1f}%",
+                    f"- late-drop override active: {shadow_intraday.get('late_drop_override_active', False)}",
+                ]
+            )
+        elif shadow_intraday.get("reason"):
+            lines.append(f"- intraday reason: {shadow_intraday.get('reason')}")
     if data_lineage:
         lines.append("")
         lines.append("Data used:")
@@ -99,3 +123,7 @@ def format_prediction(
 def _fmt_component_expected(component: dict) -> str:
     value = component.get("expected_tmax_c")
     return "not available" if value is None else f"{float(value):.1f}C"
+
+
+def _fmt_signed_c(value) -> str:
+    return "not available" if value is None else f"{float(value):+.1f}C"

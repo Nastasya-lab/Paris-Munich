@@ -111,6 +111,52 @@ def test_operational_cycle_message_escapes_dynamic_html():
     assert "<unsafe>" not in text
 
 
+def test_operational_cycle_message_includes_shadow_intraday_comparison():
+    text = telegram.format_operational_cycle_message(
+        {
+            "accepted": True,
+            "airport": "EDDM",
+            "forecast": {
+                "expected_tmax_c": 29.1,
+                "median_tmax_c": 29.0,
+                "most_likely_integer_c": 29,
+                "intervals": {"80": [29.0, 30.0]},
+                "probabilities_by_integer_c": {"29": 0.8, "30": 0.2},
+                "threshold_probabilities": {"ge_20": 1.0, "ge_25": 1.0, "ge_30": 0.2, "le_0": 0.0},
+                "forecast_components": {
+                    "shadow_mode": {
+                        "intraday_update": {
+                            "active": True,
+                            "seasonal_profile": "warm",
+                            "intraday_blend_weight": 0.95,
+                            "late_drop_override_active": True,
+                        },
+                        "final_model": {
+                            "expected_tmax_c": 29.0,
+                            "most_likely_integer_c": 29,
+                            "intervals": {"80": [29.0, 29.0]},
+                            "probabilities_by_integer_c": {"29": 0.96, "30": 0.04},
+                            "threshold_probabilities": {"ge_25": 1.0, "ge_30": 0.04},
+                        },
+                        "comparison_to_champion": {
+                            "expected_tmax_delta_c": -0.1,
+                            "ge_25_probability_delta": 0.0,
+                            "ge_30_probability_delta": -0.16,
+                        },
+                    }
+                },
+            },
+            "forecast_quality": {"status": "ok", "reasons": []},
+            "forecast_acceptance": {"cautions": []},
+        }
+    )
+
+    assert "Теневой сценарий: seasonal intraday" in text
+    assert "Ожидаемый максимум: <b>29.0 °C</b> (-0.1 °C к основному)" in text
+    assert "Не ниже +30 °C: 4.0% (-16.0% к основному)" in text
+    assert "Late-drop override: активен" in text
+
+
 def test_outcome_and_healthcheck_messages_are_russian():
     outcome = telegram.format_outcome_update_message(
         {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}
