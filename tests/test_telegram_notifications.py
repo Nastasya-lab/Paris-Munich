@@ -157,6 +157,69 @@ def test_operational_cycle_message_includes_shadow_intraday_comparison():
     assert "Late-drop override: активен" in text
 
 
+def test_metar_event_message_includes_integer_bin_probability_changes():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.4,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {"ge_20": 1.0, "ge_25": 0.02, "ge_30": 0.0},
+            "probabilities_by_integer_c": {"21": 0.2, "22": 0.5, "23": 0.3},
+            "forecast_components": {
+                "intraday_update": {
+                    "last_metar_temp_c": 20.0,
+                    "observed_max_so_far_c": 20.0,
+                    "drop_from_observed_max_c": 0.0,
+                    "peak_passed_probability": 0.2,
+                    "intraday_blend_weight": 0.55,
+                }
+            },
+            "model_version": "m1",
+            "forecast_id": "f1",
+        },
+        {
+            "previous": {
+                "expected_tmax_c": 22.3,
+                "most_likely_integer_c": 22,
+                "probabilities_by_integer_c": {"21": 0.3, "22": 0.4, "23": 0.3},
+            },
+            "current": {"most_likely_integer_c": 22},
+            "deltas": {"expected_tmax_delta_c": 0.1, "ge_20_delta": 0.0, "ge_25_delta": 0.01, "ge_30_delta": 0.0},
+        },
+        ["routine_new_metar_update"],
+    )
+
+    assert "Распределение по градусам" in text
+    assert "+21 °C: <b>20.0%</b> (-10.0 п.п.)" in text
+    assert "+22 °C: <b>50.0%</b> (+10.0 п.п.)" in text
+    assert "+23 °C: <b>30.0%</b> (+0.0 п.п.)" in text
+
+
+def test_metar_event_message_says_when_distribution_is_unchanged():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.0,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {},
+            "probabilities_by_integer_c": {"22": 1.0},
+            "forecast_components": {"intraday_update": {}},
+        },
+        {
+            "previous": {"most_likely_integer_c": 22, "probabilities_by_integer_c": {"22": 1.0}},
+            "current": {"most_likely_integer_c": 22},
+            "deltas": {},
+        },
+    )
+
+    assert "распределение не изменилось" in text
+    assert "+22 °C: <b>100.0%</b> (+0.0 п.п.)" in text
+
+
 def test_outcome_and_healthcheck_messages_are_russian():
     outcome = telegram.format_outcome_update_message(
         {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}

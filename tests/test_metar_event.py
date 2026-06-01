@@ -86,6 +86,8 @@ def test_metar_event_logs_new_metar_and_compares_probabilities(tmp_path, monkeyp
     assert result["status"] == "new_metar_forecast"
     assert result["comparison_to_previous"]["deltas"]["expected_tmax_delta_c"] == 1.0
     assert result["comparison_to_previous"]["deltas"]["ge_25_delta"] == 0.2
+    assert result["comparison_to_previous"]["current"]["probabilities_by_integer_c"]["23"] == 0.6
+    assert result["comparison_to_previous"]["previous"]["probabilities_by_integer_c"]["22"] == 0.8
     assert result["notification_needed"] is True
     assert result["notification_sent"] is True
     assert "expected_tmax_changed" in result["notification_reasons"]

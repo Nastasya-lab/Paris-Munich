@@ -209,6 +209,7 @@ def _latest_forecast_record(path: Path, *, airport: str, target_date_local: date
 
 
 def _forecast_summary_from_payload(payload: dict) -> dict:
+    distribution = _distribution_from_mapping(payload.get("probabilities_by_integer_c") or {})
     return {
         "forecast_id": payload.get("forecast_id"),
         "issue_time_utc": payload.get("issue_time_utc"),
@@ -216,19 +217,21 @@ def _forecast_summary_from_payload(payload: dict) -> dict:
         "median_tmax_c": float(payload.get("median_tmax_c", 0.0)),
         "most_likely_integer_c": int(payload.get("most_likely_integer_c", 0)),
         "threshold_probabilities": payload.get("threshold_probabilities", {}),
+        "probabilities_by_integer_c": {str(k): v for k, v in distribution.items()},
     }
 
 
 def _forecast_summary_from_record(record: dict | None) -> dict | None:
     if not record:
         return None
-    distribution = {int(k): float(v) for k, v in (record.get("probability_distribution") or {}).items()}
+    distribution = _distribution_from_mapping(record.get("probability_distribution") or {})
     return {
         "forecast_id": record.get("forecast_id"),
         "issue_time_utc": record.get("issue_time_utc"),
         "expected_tmax_c": float(record.get("expected_tmax_c", 0.0)),
         "median_tmax_c": float(record.get("median_tmax_c", 0.0)),
         "most_likely_integer_c": int(record.get("most_likely_integer_c", 0)),
+        "probabilities_by_integer_c": {str(k): v for k, v in distribution.items()},
         "threshold_probabilities": {
             "ge_20": _threshold_ge(distribution, 20),
             "ge_25": _threshold_ge(distribution, 25),
@@ -236,6 +239,18 @@ def _forecast_summary_from_record(record: dict | None) -> dict | None:
             "le_0": sum(prob for bin_c, prob in distribution.items() if bin_c <= 0),
         },
     }
+
+
+def _distribution_from_mapping(values: dict) -> dict[int, float]:
+    distribution: dict[int, float] = {}
+    for key, value in values.items():
+        try:
+            probability = float(value)
+            if probability > 0:
+                distribution[int(key)] = probability
+        except (TypeError, ValueError):
+            continue
+    return dict(sorted(distribution.items()))
 
 
 def _threshold_ge(distribution: dict[int, float], threshold: int) -> float:

@@ -303,6 +303,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
             f"Вес intraday champion: {float(intraday.get('intraday_blend_weight', 0.0)):.1%}",
         ]
     )
+    lines.extend(["", *_format_distribution_change(payload, previous)])
     shadow_final = shadow.get("final_model") or {}
     shadow_intraday = shadow.get("intraday_update") or {}
     if shadow_final:
@@ -326,6 +327,48 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
         ]
     )
     return "\n".join(lines)
+
+
+def _signed_pp(value: Any) -> str:
+    return "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445" if value is None else f"{float(value) * 100:+.1f} \u043f.\u043f."
+
+
+def _format_distribution_change(payload: dict, previous: dict) -> list[str]:
+    current_distribution = _probability_mapping(payload.get("probabilities_by_integer_c") or {})
+    if not current_distribution:
+        return ["<b>Распределение по градусам</b>", "Нет данных по корзинам."]
+
+    previous_distribution = _probability_mapping((previous or {}).get("probabilities_by_integer_c") or {})
+    bins = sorted(set(current_distribution) | set(previous_distribution))
+    if not previous_distribution:
+        return [
+            "<b>Распределение по градусам</b>",
+            "\n".join(f"{bin_c:+d} °C: <b>{current_distribution.get(bin_c, 0.0):.1%}</b>" for bin_c in bins),
+        ]
+
+    unchanged = all(abs(current_distribution.get(bin_c, 0.0) - previous_distribution.get(bin_c, 0.0)) < 0.0005 for bin_c in bins)
+    lines = ["<b>Распределение по градусам</b>"]
+    if unchanged:
+        lines.append("По сравнению с предыдущим METAR распределение не изменилось.")
+    rows = []
+    for bin_c in bins:
+        current = current_distribution.get(bin_c, 0.0)
+        previous_probability = previous_distribution.get(bin_c, 0.0)
+        if current < 0.001 and previous_probability < 0.001:
+            continue
+        rows.append(f"{bin_c:+d} °C: <b>{current:.1%}</b> ({_signed_pp(current - previous_probability)})")
+    lines.append("\n".join(rows) if rows else "Все показанные корзины остались на 0.0%.")
+    return lines
+
+
+def _probability_mapping(values: dict) -> dict[int, float]:
+    result: dict[int, float] = {}
+    for key, value in values.items():
+        try:
+            result[int(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return dict(sorted(result.items()))
 
 
 def _format_bin_change(current: dict, previous: dict) -> str:
