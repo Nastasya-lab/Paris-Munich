@@ -10,6 +10,7 @@ def build_outcome_analysis(
     monitoring_path: str | Path = "data/reports/forecast_monitoring.parquet",
     output_json_path: str | Path | None = "data/reports/outcome_analysis.json",
     output_markdown_path: str | Path | None = "docs/outcome_analysis.md",
+    variant_monitoring_path: str | Path = "data/reports/forecast_variant_monitoring.parquet",
 ) -> dict:
     path = Path(monitoring_path)
     if not path.exists():
@@ -17,6 +18,14 @@ def build_outcome_analysis(
     else:
         monitoring = pd.read_parquet(path)
         analysis = _analysis_from_monitoring(monitoring)
+    variant_path = Path(variant_monitoring_path)
+    if variant_path.exists():
+        variants = pd.read_parquet(variant_path)
+        analysis["by_forecast_variant"] = _variant_analysis(variants)
+        analysis["champion_vs_shadow"] = _champion_shadow_pair_analysis(variants)
+    else:
+        analysis["by_forecast_variant"] = []
+        analysis["champion_vs_shadow"] = {}
     if output_json_path is not None:
         output = Path(output_json_path)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +54,12 @@ def format_outcome_analysis_markdown(analysis: dict) -> str:
         lines.append("No scored forecasts yet.")
     lines.extend(["", "## By model", ""])
     lines.extend(_table_lines(analysis.get("by_model", [])))
+    lines.extend(["", "## Champion vs shadow", ""])
+    lines.extend(_table_lines(analysis.get("by_forecast_variant", [])))
+    pair = analysis.get("champion_vs_shadow", {}) or {}
+    if pair:
+        lines.extend(["", "## Champion vs shadow paired score", ""])
+        lines.extend(f"- `{key}`: `{value}`" for key, value in pair.items())
     lines.extend(["", "## By forecast quality", ""])
     lines.extend(_table_lines(analysis.get("by_quality", [])))
     lines.extend(["", "## By forecast acceptance", ""])
@@ -86,6 +101,8 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         "rows": len(df),
         "overall": _metric_summary(df),
         "by_model": _group_summary(df, ["model_version"]),
+        "by_forecast_variant": [],
+        "champion_vs_shadow": {},
         "by_quality": _group_summary(df, ["forecast_quality_status"]),
         "by_acceptance": _group_summary(df, ["forecast_accepted"]),
         "by_source_mismatch": _group_summary(df, ["any_source_mismatch"]),
@@ -117,6 +134,8 @@ def _empty_analysis(reason: str) -> dict:
         "rows": 0,
         "overall": {},
         "by_model": [],
+        "by_forecast_variant": [],
+        "champion_vs_shadow": {},
         "by_quality": [],
         "by_acceptance": [],
         "by_source_mismatch": [],
@@ -153,6 +172,69 @@ def _group_summary(df: pd.DataFrame, group_cols: list[str]) -> list[dict]:
         .reset_index()
     )
     return _records(grouped)
+
+
+def _variant_analysis(variants: pd.DataFrame) -> list[dict]:
+    if variants.empty or "forecast_variant" not in variants.columns:
+        return []
+    df = variants.copy()
+    df["abs_error_expected_c"] = df["error_expected_c"].abs()
+    grouped = (
+        df.groupby("forecast_variant", dropna=False)
+        .agg(
+            scored_forecasts=("forecast_id", "count"),
+            mae_expected=("abs_error_expected_c", "mean"),
+            bias_expected=("error_expected_c", "mean"),
+            mean_nll=("nll", "mean"),
+            mean_crps=("crps", "mean"),
+            brier_ge_20=("brier_ge_20", "mean"),
+            brier_ge_25=("brier_ge_25", "mean"),
+            brier_ge_30=("brier_ge_30", "mean"),
+            mean_probability_actual_integer_bin=("probability_actual_integer_bin", "mean"),
+        )
+        .reset_index()
+    )
+    return _records(grouped)
+
+
+def _champion_shadow_pair_analysis(variants: pd.DataFrame) -> dict:
+    required = {"forecast_id", "forecast_variant", "error_expected_c", "nll", "crps", "probability_actual_integer_bin"}
+    if variants.empty or not required.issubset(variants.columns):
+        return {}
+    df = variants[variants["forecast_variant"].isin(["production_champion", "shadow_seasonal_intraday"])].copy()
+    if df.empty:
+        return {}
+    df["abs_error_expected_c"] = df["error_expected_c"].abs()
+    pivot = df.pivot_table(
+        index="forecast_id",
+        columns="forecast_variant",
+        values=["abs_error_expected_c", "nll", "crps", "probability_actual_integer_bin"],
+        aggfunc="first",
+    )
+    if ("abs_error_expected_c", "production_champion") not in pivot or ("abs_error_expected_c", "shadow_seasonal_intraday") not in pivot:
+        return {}
+    paired = pivot.dropna()
+    if paired.empty:
+        return {}
+    champion_abs = paired[("abs_error_expected_c", "production_champion")]
+    shadow_abs = paired[("abs_error_expected_c", "shadow_seasonal_intraday")]
+    champion_nll = paired[("nll", "production_champion")]
+    shadow_nll = paired[("nll", "shadow_seasonal_intraday")]
+    champion_crps = paired[("crps", "production_champion")]
+    shadow_crps = paired[("crps", "shadow_seasonal_intraday")]
+    champion_prob = paired[("probability_actual_integer_bin", "production_champion")]
+    shadow_prob = paired[("probability_actual_integer_bin", "shadow_seasonal_intraday")]
+    return {
+        "paired_forecasts": int(len(paired)),
+        "shadow_mae_win_rate": float((shadow_abs < champion_abs).mean()),
+        "shadow_nll_win_rate": float((shadow_nll < champion_nll).mean()),
+        "shadow_crps_win_rate": float((shadow_crps < champion_crps).mean()),
+        "shadow_actual_bin_probability_win_rate": float((shadow_prob > champion_prob).mean()),
+        "mean_shadow_minus_champion_abs_error_c": float((shadow_abs - champion_abs).mean()),
+        "mean_shadow_minus_champion_nll": float((shadow_nll - champion_nll).mean()),
+        "mean_shadow_minus_champion_crps": float((shadow_crps - champion_crps).mean()),
+        "mean_shadow_minus_champion_actual_bin_probability": float((shadow_prob - champion_prob).mean()),
+    }
 
 
 def _records(df: pd.DataFrame) -> list[dict]:

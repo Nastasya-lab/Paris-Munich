@@ -13,6 +13,7 @@ def update_forecast_outcomes(
     forecast_log_path: str | Path = "data/logs/forecast_log.jsonl",
     target_path: str | Path = "data/processed/daily_target.parquet",
     output_path: str | Path = "data/reports/forecast_monitoring.parquet",
+    variant_output_path: str | Path | None = None,
 ) -> pd.DataFrame:
     log_path = Path(forecast_log_path)
     if not log_path.exists():
@@ -22,36 +23,25 @@ def update_forecast_outcomes(
     targets["target_date_local"] = targets["target_date_local"].astype(str)
     target_map = targets.set_index(["airport_icao", "target_date_local"])["tmax_c"].to_dict()
     rows = []
+    variant_rows = []
     for record in _iter_forecast_log(log_path):
         key = (record["airport"], record["target_date_local"])
         if key not in target_map:
             continue
         actual = float(target_map[key])
         dist = _distribution_from_record(record)
-        rows.append(
-            {
-                "forecast_id": record["forecast_id"],
-                "airport": record["airport"],
-                "issue_time_utc": record["issue_time_utc"],
-                "target_date_local": record["target_date_local"],
-                "model_version": record.get("model_version"),
-                **_operational_metadata(record),
-                "actual_tmax_c": actual,
-                "expected_tmax_c": record["expected_tmax_c"],
-                "median_tmax_c": record["median_tmax_c"],
-                "error_expected_c": record["expected_tmax_c"] - actual,
-                "error_median_c": record["median_tmax_c"] - actual,
-                "nll": nll_integer_bin(dist, actual),
-                "crps": crps_discrete(dist, actual),
-                "brier_ge_20": brier(dist.threshold_ge(20), actual >= 20),
-                "brier_ge_25": brier(dist.threshold_ge(25), actual >= 25),
-                "brier_ge_30": brier(dist.threshold_ge(30), actual >= 30),
-            }
-        )
+        base_row = _score_distribution_row(record, actual, dist, "production_champion")
+        rows.append({key: value for key, value in base_row.items() if key not in {"forecast_variant", "variant_description"}})
+        variant_rows.extend(_variant_rows_from_record(record, actual, champion_dist=dist))
     out = pd.DataFrame(rows)
     if not out.empty:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         out.to_parquet(output_path, index=False)
+    variants = pd.DataFrame(variant_rows)
+    if not variants.empty:
+        variant_output = Path(variant_output_path) if variant_output_path is not None else Path(output_path).parent / "forecast_variant_monitoring.parquet"
+        variant_output.parent.mkdir(parents=True, exist_ok=True)
+        variants.to_parquet(variant_output, index=False)
     return out
 
 
@@ -100,9 +90,86 @@ def build_forecast_outcome_status(
 
 def _distribution_from_record(record: dict) -> TmaxDistribution:
     probabilities = record["probability_distribution"]
+    return _distribution_from_probabilities(probabilities)
+
+
+def _distribution_from_probabilities(probabilities: dict) -> TmaxDistribution:
     bins = [int(k) for k in probabilities.keys()]
     probs = [float(v) for v in probabilities.values()]
     return TmaxDistribution(bins, probs)
+
+
+def _score_distribution_row(record: dict, actual: float, dist: TmaxDistribution, forecast_variant: str, description: str | None = None) -> dict:
+    expected = dist.expected_tmax_c
+    median = dist.median_tmax_c
+    return {
+        "forecast_id": record["forecast_id"],
+        "forecast_variant": forecast_variant,
+        "variant_description": description,
+        "airport": record["airport"],
+        "issue_time_utc": record["issue_time_utc"],
+        "target_date_local": record["target_date_local"],
+        "model_version": record.get("model_version"),
+        **_operational_metadata(record),
+        "actual_tmax_c": actual,
+        "expected_tmax_c": expected,
+        "median_tmax_c": median,
+        "most_likely_integer_c": dist.most_likely_integer_c,
+        "error_expected_c": expected - actual,
+        "error_median_c": median - actual,
+        "nll": nll_integer_bin(dist, actual),
+        "crps": crps_discrete(dist, actual),
+        "brier_ge_20": brier(dist.threshold_ge(20), actual >= 20),
+        "brier_ge_25": brier(dist.threshold_ge(25), actual >= 25),
+        "brier_ge_30": brier(dist.threshold_ge(30), actual >= 30),
+        "probability_actual_integer_bin": _probability_at_actual_bin(dist, actual),
+    }
+
+
+def _variant_rows_from_record(record: dict, actual: float, *, champion_dist: TmaxDistribution) -> list[dict]:
+    rows = [_score_distribution_row(record, actual, champion_dist, "production_champion", "Operational distribution returned to users.")]
+    metadata = record.get("raw_input_metadata", {}) or {}
+    for name, payload in (metadata.get("forecast_variants", {}) or {}).items():
+        if name == "production_champion":
+            continue
+        dist = _distribution_from_variant_payload(payload)
+        if dist is None:
+            continue
+        rows.append(_score_distribution_row(record, actual, dist, name, _variant_description(payload)))
+    if not any(row["forecast_variant"] == "shadow_seasonal_intraday" for row in rows):
+        fallback = _fallback_shadow_distribution(metadata)
+        if fallback is not None:
+            rows.append(_score_distribution_row(record, actual, fallback, "shadow_seasonal_intraday", "Shadow distribution reconstructed from legacy forecast_components."))
+    return rows
+
+
+def _distribution_from_variant_payload(payload: dict) -> TmaxDistribution | None:
+    distribution = (payload or {}).get("distribution") or payload
+    probabilities = (distribution or {}).get("probabilities_by_integer_c")
+    if not probabilities:
+        return None
+    return _distribution_from_probabilities(probabilities)
+
+
+def _fallback_shadow_distribution(metadata: dict) -> TmaxDistribution | None:
+    components = metadata.get("forecast_components", {}) or {}
+    shadow = components.get("shadow_mode", {}) or {}
+    final_model = shadow.get("final_model", {}) or {}
+    probabilities = final_model.get("probabilities_by_integer_c")
+    if not probabilities:
+        return None
+    return _distribution_from_probabilities(probabilities)
+
+
+def _variant_description(payload: dict) -> str | None:
+    if isinstance(payload, dict):
+        return payload.get("description")
+    return None
+
+
+def _probability_at_actual_bin(dist: TmaxDistribution, actual: float) -> float:
+    actual_bin = int(round(actual))
+    return float(dist.probabilities[dist.bins_c == actual_bin].sum())
 
 
 def _iter_forecast_log(path: Path):

@@ -9,6 +9,7 @@ def test_update_forecast_outcomes(tmp_path):
     log_path = tmp_path / "forecast_log.jsonl"
     target_path = tmp_path / "daily_target.parquet"
     output_path = tmp_path / "monitoring.parquet"
+    variant_output_path = tmp_path / "variant_monitoring.parquet"
     record = {
         "forecast_id": "f1",
         "airport": "EDDM",
@@ -27,6 +28,12 @@ def test_update_forecast_outcomes(tmp_path):
                 "blocking_reasons": ["quality_status_ok"],
                 "cautions": ["preliminary calibration"],
             },
+            "forecast_variants": {
+                "shadow_seasonal_intraday": {
+                    "description": "shadow",
+                    "distribution": {"probabilities_by_integer_c": {"25": 0.8, "26": 0.2}},
+                }
+            },
         },
     }
     log_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
@@ -38,9 +45,13 @@ def test_update_forecast_outcomes(tmp_path):
             "quality_flags": ["ok"],
         }
     ).to_parquet(target_path, index=False)
-    out = update_forecast_outcomes(log_path, target_path, output_path)
+    out = update_forecast_outcomes(log_path, target_path, output_path, variant_output_path=variant_output_path)
     assert len(out) == 1
     assert output_path.exists()
+    assert variant_output_path.exists()
+    variants = pd.read_parquet(variant_output_path)
+    assert set(variants["forecast_variant"]) == {"production_champion", "shadow_seasonal_intraday"}
+    assert variants.loc[variants["forecast_variant"] == "shadow_seasonal_intraday", "probability_actual_integer_bin"].iloc[0] == 0.8
     assert out.iloc[0]["forecast_id"] == "f1"
     assert out.iloc[0]["metar_source_mismatch"] == True
     assert out.iloc[0]["nwp_missing"] == True

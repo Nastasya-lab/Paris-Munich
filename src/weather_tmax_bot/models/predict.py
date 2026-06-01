@@ -74,6 +74,20 @@ def predict_best_available(
             blend_weight_profile="seasonal_shadow",
         )
         dist = intraday.distribution
+        feature_row["forecast_variants"] = {
+            "production_champion": {
+                "description": "Operational distribution returned to users.",
+                "distribution": dist.to_payload(),
+            },
+            "base_prior": {
+                "description": "Full-day prior before same-day intraday update.",
+                "distribution": base_dist.to_payload(),
+            },
+            "shadow_seasonal_intraday": {
+                "description": "Shadow seasonal intraday challenger; never used as the operational forecast.",
+                "distribution": shadow_intraday.distribution.to_payload(),
+            },
+        }
         feature_row["intraday_update"] = intraday.details
         feature_row["shadow_intraday_update"] = shadow_intraday.details
         feature_row["forecast_components"] = {
