@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,8 @@ def main(
     target_date: str | None = typer.Option(None),
     issue_time: str = typer.Option("now"),
     timeout: int = typer.Option(120),
+    poll_timeout_seconds: int = typer.Option(0, help="For metar-event, keep polling until a new METAR appears."),
+    poll_interval_seconds: int = typer.Option(30, help="For metar-event polling, seconds between checks."),
 ):
     base = (base_url or os.getenv("MUNICH_API_BASE_URL") or "").rstrip("/")
     if not base:
@@ -42,18 +45,18 @@ def main(
         )
     elif job == "metar-event":
         target = target_date or datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
-        response = requests.post(
-            f"{base}/metar-event-cycle",
-            params={
-                "airport": airport,
-                "target_date": target,
-                "issue_time": issue_time,
-                "log": True,
-                "notify": True,
-            },
+        result = _run_metar_event_with_optional_polling(
+            base=base,
             headers=headers,
-            timeout=timeout,
+            airport=airport,
+            target=target,
+            issue_time=issue_time,
+            request_timeout=timeout,
+            poll_timeout_seconds=poll_timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
         )
+        print(json.dumps(result, indent=2, default=str))
+        return
     elif job == "outcome":
         response = requests.post(
             f"{base}/pending-truth-cron",
@@ -72,6 +75,54 @@ def main(
         raise typer.BadParameter("job must be forecast, metar-event, outcome, or health")
     response.raise_for_status()
     print(json.dumps(response.json(), indent=2, default=str))
+
+
+def _run_metar_event_with_optional_polling(
+    *,
+    base: str,
+    headers: dict[str, str],
+    airport: str,
+    target: str,
+    issue_time: str,
+    request_timeout: int,
+    poll_timeout_seconds: int,
+    poll_interval_seconds: int,
+) -> dict:
+    attempts = []
+    deadline = time.monotonic() + max(0, poll_timeout_seconds)
+    interval = max(5, poll_interval_seconds)
+    while True:
+        response = requests.post(
+            f"{base}/metar-event-cycle",
+            params={
+                "airport": airport,
+                "target_date": target,
+                "issue_time": issue_time,
+                "log": True,
+                "notify": True,
+            },
+            headers=headers,
+            timeout=request_timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        attempts.append(
+            {
+                "status": payload.get("status"),
+                "latest_metar_time_utc": payload.get("latest_metar_time_utc"),
+                "notification_sent": payload.get("notification_sent"),
+            }
+        )
+        if payload.get("status") == "new_metar_forecast" or time.monotonic() >= deadline:
+            payload["polling"] = {
+                "enabled": poll_timeout_seconds > 0,
+                "attempts": attempts,
+                "attempt_count": len(attempts),
+                "poll_timeout_seconds": poll_timeout_seconds,
+                "poll_interval_seconds": interval,
+            }
+            return payload
+        time.sleep(interval)
 
 
 if __name__ == "__main__":
