@@ -256,6 +256,103 @@ def _format_freshness(refresh: dict) -> list[str]:
     return lines
 
 
+def format_metar_event_message(payload: dict, comparison: dict, reasons: list[str] | None = None) -> str:
+    forecast_components = payload.get("forecast_components", {}) or {}
+    intraday = forecast_components.get("intraday_update", {}) or {}
+    shadow = forecast_components.get("shadow_mode", {}) or {}
+    previous = comparison.get("previous") or {}
+    current = comparison.get("current") or {}
+    deltas = comparison.get("deltas") or {}
+    thresholds = payload.get("threshold_probabilities", {}) or {}
+    lines = [
+        f"<b>METAR-обновление прогноза: {escape(str(payload.get('airport', 'EDDM')))}</b>",
+        f"Дата: <b>{escape(str(payload.get('target_date_local', 'не указана')))}</b>",
+        f"Выпуск: {_format_local_time(payload.get('issue_time_utc'))}",
+        "Причина: появился новый METAR, пересчитан intraday-прогноз.",
+        "",
+        "<b>Что изменилось</b>",
+    ]
+    if previous:
+        lines.extend(
+            [
+                f"Ожидаемый максимум: <b>{float(payload.get('expected_tmax_c', 0.0)):.1f} °C</b> ({_signed_c(deltas.get('expected_tmax_delta_c'))})",
+                f"Самая вероятная корзина: <b>{int(payload.get('most_likely_integer_c', 0))} °C</b> ({_format_bin_change(current, previous)})",
+                f"P(Tmax ≥ 20 °C): {float(thresholds.get('ge_20', 0.0)):.1%} ({_signed_pct(deltas.get('ge_20_delta'))})",
+                f"P(Tmax ≥ 25 °C): {float(thresholds.get('ge_25', 0.0)):.1%} ({_signed_pct(deltas.get('ge_25_delta'))})",
+                f"P(Tmax ≥ 30 °C): {float(thresholds.get('ge_30', 0.0)):.1%} ({_signed_pct(deltas.get('ge_30_delta'))})",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"Ожидаемый максимум: <b>{float(payload.get('expected_tmax_c', 0.0)):.1f} °C</b>",
+                f"Самая вероятная корзина: <b>{int(payload.get('most_likely_integer_c', 0))} °C</b>",
+                f"P(Tmax ≥ 25 °C): {float(thresholds.get('ge_25', 0.0)):.1%}",
+                f"P(Tmax ≥ 30 °C): {float(thresholds.get('ge_30', 0.0)):.1%}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "<b>METAR-сигнал</b>",
+            f"Последняя температура: {float(intraday.get('last_metar_temp_c', 0.0)):.1f} °C",
+            f"Наблюдаемый максимум: {float(intraday.get('observed_max_so_far_c', 0.0)):.1f} °C",
+            f"Падение от максимума: {float(intraday.get('drop_from_observed_max_c', 0.0)):.1f} °C",
+            f"Вероятность, что пик уже был: {float(intraday.get('peak_passed_probability', 0.0)):.1%}",
+            f"Вес intraday champion: {float(intraday.get('intraday_blend_weight', 0.0)):.1%}",
+        ]
+    )
+    shadow_final = shadow.get("final_model") or {}
+    shadow_intraday = shadow.get("intraday_update") or {}
+    if shadow_final:
+        lines.extend(
+            [
+                "",
+                "<b>Shadow-сценарий</b>",
+                f"Ожидаемый максимум: {float(shadow_final.get('expected_tmax_c', 0.0)):.1f} °C",
+                f"Вес seasonal intraday: {float(shadow_intraday.get('intraday_blend_weight', 0.0)):.1%}",
+                f"P(Tmax ≥ 30 °C): {float((shadow_final.get('threshold_probabilities') or {}).get('ge_30', 0.0)):.1%}",
+            ]
+        )
+    if reasons:
+        lines.extend(["", "<b>Почему отправлено</b>", ", ".join(_translate_reason(reason) for reason in reasons)])
+    lines.extend(
+        [
+            "",
+            "<b>Технически</b>",
+            f"Модель: <code>{escape(str(payload.get('model_version', 'не указана')))}</code>",
+            f"ID прогноза: <code>{escape(str(payload.get('forecast_id', 'не указан')))}</code>",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _format_bin_change(current: dict, previous: dict) -> str:
+    current_bin = current.get("most_likely_integer_c")
+    previous_bin = previous.get("most_likely_integer_c")
+    if current_bin is None or previous_bin is None:
+        return "предыдущая неизвестна"
+    if int(current_bin) == int(previous_bin):
+        return "без изменений"
+    return f"было {int(previous_bin)} °C"
+
+
+def _translate_reason(reason: str) -> str:
+    labels = {
+        "first_new_metar_forecast": "первый METAR-прогноз за день",
+        "expected_tmax_changed": "изменился ожидаемый Tmax",
+        "most_likely_bin_changed": "изменилась главная корзина",
+        "ge_20_probability_changed": "заметно изменилась вероятность ≥20 °C",
+        "ge_25_probability_changed": "заметно изменилась вероятность ≥25 °C",
+        "ge_30_probability_changed": "заметно изменилась вероятность ≥30 °C",
+        "temperature_dropped_from_observed_max": "температура заметно упала от максимума",
+        "peak_likely_passed": "вероятно, дневной пик уже пройден",
+        "shadow_differs_from_champion": "shadow заметно расходится с основной моделью",
+    }
+    return labels.get(reason, escape(str(reason)))
+
+
 def format_outcome_update_message(result: dict) -> str:
     status = result.get("status", {})
     refresh = result.get("refresh_summary") or {}

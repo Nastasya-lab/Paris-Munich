@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from zoneinfo import ZoneInfo
 
 import os
 
@@ -21,6 +22,7 @@ from weather_tmax_bot.notifications.telegram import (
 )
 from weather_tmax_bot.operations.acceptance import evaluate_forecast_acceptance
 from weather_tmax_bot.operations.launch_readiness import assess_launch_readiness
+from weather_tmax_bot.operations.metar_event import run_metar_event_cycle
 from weather_tmax_bot.operations.refresh import refresh_operational_data
 from weather_tmax_bot.operations.predict_run import run_prediction_with_optional_refresh
 from weather_tmax_bot.operations.pending_truth import pending_truth_status, run_pending_truth_cron
@@ -115,6 +117,28 @@ def operational_cycle(
     if notify:
         summary["telegram_notification"] = notify_if_configured(format_operational_cycle_message(summary))
     return summary
+
+
+@app.post("/metar-event-cycle")
+def metar_event_cycle(
+    airport: str = "EDDM",
+    target_date: date | None = None,
+    issue_time: str = "now",
+    log: bool = True,
+    notify: bool = True,
+    api_key: str | None = None,
+    x_api_key: str | None = Header(default=None),
+):
+    _require_api_key(x_api_key=x_api_key, api_key=api_key)
+    issue = parse_issue_time(issue_time)
+    target = target_date or issue.astimezone(ZoneInfo("Europe/Berlin")).date()
+    return run_metar_event_cycle(
+        airport=airport,
+        target_date_local=target,
+        issue_time_utc=issue,
+        log=log,
+        notify=notify,
+    )
 
 
 @app.post("/predict-operational")

@@ -10,7 +10,7 @@ import typer
 
 
 def main(
-    job: str = typer.Argument(..., help="forecast, outcome, or health"),
+    job: str = typer.Argument(..., help="forecast, metar-event, outcome, or health"),
     base_url: str | None = typer.Option(None),
     airport: str = typer.Option("EDDM"),
     target_date: str | None = typer.Option(None),
@@ -40,6 +40,20 @@ def main(
             headers=headers,
             timeout=timeout,
         )
+    elif job == "metar-event":
+        target = target_date or datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
+        response = requests.post(
+            f"{base}/metar-event-cycle",
+            params={
+                "airport": airport,
+                "target_date": target,
+                "issue_time": issue_time,
+                "log": True,
+                "notify": True,
+            },
+            headers=headers,
+            timeout=timeout,
+        )
     elif job == "outcome":
         response = requests.post(
             f"{base}/pending-truth-cron",
@@ -55,7 +69,7 @@ def main(
             timeout=timeout,
         )
     else:
-        raise typer.BadParameter("job must be forecast, outcome, or health")
+        raise typer.BadParameter("job must be forecast, metar-event, outcome, or health")
     response.raise_for_status()
     print(json.dumps(response.json(), indent=2, default=str))
 
