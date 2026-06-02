@@ -55,7 +55,7 @@ def main(
             poll_timeout_seconds=poll_timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
         )
-        print(json.dumps(result, indent=2, default=str))
+        print(json.dumps(_compact_job_result(job, result), indent=2, default=str))
         return
     elif job == "outcome":
         response = requests.post(
@@ -74,7 +74,7 @@ def main(
     else:
         raise typer.BadParameter("job must be forecast, metar-event, outcome, or health")
     response.raise_for_status()
-    print(json.dumps(response.json(), indent=2, default=str))
+    print(json.dumps(_compact_job_result(job, response.json()), indent=2, default=str))
 
 
 def _run_metar_event_with_optional_polling(
@@ -123,6 +123,43 @@ def _run_metar_event_with_optional_polling(
             }
             return payload
         time.sleep(interval)
+
+
+def _compact_job_result(job: str, payload: dict) -> dict:
+    """Keep Railway logs useful without dumping full distributions and Telegram responses."""
+    compact = {
+        "job": job,
+        "status": payload.get("status"),
+        "airport": payload.get("airport"),
+        "target_date_local": payload.get("target_date_local"),
+        "issue_time_utc": payload.get("issue_time_utc"),
+        "forecast_id": payload.get("forecast_id"),
+        "accepted": payload.get("accepted"),
+        "recommendation": payload.get("recommendation"),
+    }
+    if job == "metar-event":
+        compact.update(
+            {
+                "latest_metar_time_utc": payload.get("latest_metar_time_utc"),
+                "notification_sent": payload.get("notification_sent"),
+                "notification_reasons": payload.get("notification_reasons"),
+                "polling": payload.get("polling"),
+            }
+        )
+    elif job == "forecast":
+        compact["forecast_quality"] = (payload.get("forecast_quality") or {}).get("status")
+    elif job == "outcome":
+        compact.update(
+            {
+                "ran_refresh": payload.get("ran_refresh"),
+                "reports_updated": payload.get("reports_updated"),
+                "pending_rows": (payload.get("status") or {}).get("pending_rows"),
+                "ready_rows": (payload.get("status") or {}).get("ready_rows"),
+            }
+        )
+    elif job == "health":
+        compact["ready_for_forward_ops"] = payload.get("ready_for_forward_ops")
+    return {key: value for key, value in compact.items() if value is not None}
 
 
 if __name__ == "__main__":

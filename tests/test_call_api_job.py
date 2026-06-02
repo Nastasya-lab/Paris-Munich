@@ -57,3 +57,25 @@ def test_metar_event_polling_stops_when_new_metar_arrives(monkeypatch):
     assert result["status"] == "new_metar_forecast"
     assert len(calls) == 2
     assert result["polling"]["attempt_count"] == 2
+
+
+def test_compact_job_result_omits_large_forecast_payload():
+    module = _load_job_module()
+
+    compact = module._compact_job_result(
+        "metar-event",
+        {
+            "status": "new_metar_forecast",
+            "airport": "EDDM",
+            "forecast_id": "f1",
+            "latest_metar_time_utc": "2026-06-02T16:20:00Z",
+            "notification_sent": True,
+            "forecast": {"forecast_components": {"very": "large"}},
+            "telegram_notification": {"response": {"very": "large"}},
+        },
+    )
+
+    assert compact["forecast_id"] == "f1"
+    assert compact["notification_sent"] is True
+    assert "forecast" not in compact
+    assert "telegram_notification" not in compact
