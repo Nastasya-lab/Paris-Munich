@@ -3,6 +3,7 @@ import pandas as pd
 from weather_tmax_bot.models.intraday_ml import (
     IntradayMLSurvivalCalibrator,
     IntradayMLUpsideModel,
+    infer_intraday_ml_context,
     prepare_intraday_ml_dataset,
 )
 
@@ -114,5 +115,33 @@ def test_intraday_ml_reports_when_oof_calibration_is_applied():
 
     _, details = model.predict_distribution(rows[0])
 
-    assert details["calibration_status"] == "out_of_fold_isotonic_survival_calibrated"
+    assert details["calibration_status"] == "contextual_out_of_fold_survival_calibrated"
     assert "raw_probability_upside_ge_1c" in details
+
+
+def test_intraday_ml_context_separates_morning_rain_from_late_sharp_drop():
+    morning = infer_intraday_ml_context(
+        {
+            "issue_hour_utc": 6,
+            "month": 6,
+            "last_metar_temp_c": 15.0,
+            "observed_max_so_far_from_metar": 18.0,
+            "has_precip_recent": True,
+            "model_precip_sum": 0.0,
+        }
+    )
+    evening = infer_intraday_ml_context(
+        {
+            "issue_hour_utc": 15,
+            "month": 6,
+            "last_metar_temp_c": 18.0,
+            "observed_max_so_far_from_metar": 23.0,
+            "has_precip_recent": True,
+            "model_precip_sum": 2.0,
+        }
+    )
+
+    assert morning["phase"] == "morning"
+    assert morning["weather_regime"] == "adverse"
+    assert evening["phase"] == "evening"
+    assert evening["weather_regime"] == "sharp_drop"

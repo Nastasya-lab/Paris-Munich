@@ -7,16 +7,17 @@
     "2025-12-30"
   ],
   "training_rows": 15299,
-  "calibration_version": "intraday_ml_survival_isotonic_oof_v1",
+  "calibration_version": "intraday_ml_contextual_survival_oof_v2",
   "calibration_rows": 1701,
   "calibration_metadata": {
-    "calibration_method": "out_of_fold_isotonic_survival",
+    "calibration_method": "contextual_out_of_fold_isotonic_survival",
     "max_upside_c": 20,
     "min_rows_per_threshold": 200,
     "fitted": true,
     "prior_blend_weight": 0.35,
     "prior_smoothing": 1.0,
     "max_prior_blend_weight": 0.35,
+    "min_context_rows": 120,
     "threshold_rows": {
       "1": 1701,
       "2": 1701,
@@ -39,6 +40,24 @@
       "19": 1701,
       "20": 1701
     },
+    "context_rows": {
+      "phase|season|weather_regime:daytime|cool|benign": 120,
+      "phase|season|weather_regime:daytime|warm|benign": 123,
+      "phase|season|weather_regime:morning|cool|adverse": 158,
+      "phase|season|weather_regime:morning|cool|benign": 160,
+      "phase|season|weather_regime:morning|warm|adverse": 158,
+      "phase|season|weather_regime:morning|warm|benign": 160,
+      "phase|season:daytime|cool": 246,
+      "phase|season:daytime|warm": 240,
+      "phase|season:evening|cool": 246,
+      "phase|season:evening|warm": 240,
+      "phase|season:morning|cool": 369,
+      "phase|season:morning|warm": 360,
+      "phase:daytime": 486,
+      "phase:evening": 486,
+      "phase:morning": 729
+    },
+    "context_count": 15,
     "calibrated_thresholds": [
       1,
       2,
@@ -78,11 +97,11 @@
       "mean_false_upside_probability": 0.33573228828664264
     },
     "calibrated": {
-      "mae_expected": 1.7365550598683963,
-      "mean_nll": 4.645358172450836,
-      "mean_crps": 0.05269490138478966,
-      "coverage_80": 0.6368767638758231,
-      "mean_false_upside_probability": 0.3765868169051985
+      "mae_expected": 1.6404744491533199,
+      "mean_nll": 4.701704401352137,
+      "mean_crps": 0.05260512851040853,
+      "coverage_80": 0.6406396989651929,
+      "mean_false_upside_probability": 0.3699337197905212
     }
   },
   "calibration_folds": [
@@ -195,7 +214,7 @@
     "model_relative_humidity_mean"
   ],
   "data_snapshot_hash": "3fb37617f752a11ea7fe82650d0692ecdb165e64747054b273db48d3ffed1ef0",
-  "created_at_utc": "2026-06-02T07:45:51.212579+00:00",
+  "created_at_utc": "2026-06-02T08:13:52.593438+00:00",
   "rolling_backtest": [
     {
       "model_variant": "empirical_hourly_upside_baseline",
@@ -217,17 +236,17 @@
       "model_variant": "intraday_ml_core_challenger_v1",
       "rows": 1063,
       "distinct_target_days": 152,
-      "mae_expected": 1.7365550599,
-      "rmse_expected": 2.3592352589,
-      "bias_expected": 0.5302046221,
-      "mean_nll": 4.6453581725,
-      "mean_crps": 0.0526949014,
-      "brier_peak_already_passed": 0.0946776451,
-      "brier_upside_ge_1c": 0.0960956667,
-      "brier_upside_ge_2c": 0.0968141334,
-      "brier_upside_ge_3c": 0.0986376585,
-      "coverage_80": 0.6368767639,
-      "mean_false_upside_probability": 0.3765868169
+      "mae_expected": 1.6404744492,
+      "rmse_expected": 2.311063912,
+      "bias_expected": 0.3601880229,
+      "mean_nll": 4.7017044014,
+      "mean_crps": 0.0526051285,
+      "brier_peak_already_passed": 0.0939350475,
+      "brier_upside_ge_1c": 0.0962477601,
+      "brier_upside_ge_2c": 0.0975497391,
+      "brier_upside_ge_3c": 0.0996316058,
+      "coverage_80": 0.640639699,
+      "mean_false_upside_probability": 0.3699337198
     },
     {
       "model_variant": "intraday_ml_core_challenger_v1_raw",

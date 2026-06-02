@@ -244,7 +244,7 @@ def _format_ml_shadow_summary(components: dict) -> list[str]:
     calibration_status = str(details.get("calibration_status", "unknown"))
     calibration_note = (
         "Предварительная ML-модель. Не влияет на основной прогноз; вероятности проходят отдельную out-of-fold калибровку."
-        if calibration_status == "out_of_fold_isotonic_survival_calibrated"
+        if calibration_status == "contextual_out_of_fold_survival_calibrated"
         else "Предварительная ML-модель. Не влияет на основной прогноз; последний калибратор проверен, но не включен из-за gate."
     )
     lines = [

@@ -14,6 +14,7 @@ from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.models.intraday_ml import (
     IntradayMLSurvivalCalibrator,
     IntradayMLUpsideModel,
+    infer_intraday_ml_context,
     prepare_intraday_ml_dataset,
 )
 from weather_tmax_bot.utils.hashing import stable_hash
@@ -48,7 +49,7 @@ def main() -> None:
         "mode": "shadow_only",
         "training_period": [str(usable["target_date_local"].min()), str(usable["target_date_local"].max())],
         "training_rows": len(usable),
-        "calibration_version": "intraday_ml_survival_isotonic_oof_v1",
+        "calibration_version": "intraday_ml_contextual_survival_oof_v2",
         "calibration_rows": len(calibration_rows),
         "calibration_metadata": final_calibrator.to_metadata(),
         "calibration_deployment": calibration_deployment,
@@ -169,6 +170,7 @@ def _survival_calibration_rows(model: IntradayMLUpsideModel, frame: pd.DataFrame
             "issue_hour_utc": int(row["issue_hour_utc"]),
             "remaining_upside_c": remaining_upside,
         }
+        out.update(infer_intraday_ml_context(row))
         for threshold in range(1, model.max_upside_c + 1):
             out[f"raw_probability_upside_ge_{threshold}c"] = float(survival[threshold])
             out[f"actual_upside_ge_{threshold}c"] = float(remaining_upside >= threshold)
@@ -282,6 +284,7 @@ def _doc(metadata: dict, by_hour: pd.DataFrame, by_fold: pd.DataFrame) -> str:
         f"- calibration rows: `{metadata['calibration_rows']}`",
         f"- calibration version: `{metadata['calibration_version']}`",
         f"- calibration deployment accepted: `{metadata['calibration_deployment']['accepted']}`",
+        f"- calibration context count: `{metadata['calibration_metadata'].get('context_count', 0)}`",
         f"- training period: `{metadata['training_period'][0]}` to `{metadata['training_period'][1]}`",
         f"- calibrated thresholds: `{metadata['calibration_metadata']['calibrated_thresholds']}`",
         "## Rolling comparison",

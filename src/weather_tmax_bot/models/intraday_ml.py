@@ -70,9 +70,12 @@ class IntradayMLSurvivalCalibrator:
     min_rows_per_threshold: int = 200
     prior_smoothing: float = 1.0
     max_prior_blend_weight: float = 0.35
+    min_context_rows: int = 120
     threshold_calibrators: dict[int, IsotonicRegression | None] = field(default_factory=dict)
     threshold_rows: dict[int, int] = field(default_factory=dict)
     hourly_prior_survival: dict[int, dict[int, float]] = field(default_factory=dict)
+    contextual_prior_survival: dict[str, dict[int, float]] = field(default_factory=dict)
+    context_rows: dict[str, int] = field(default_factory=dict)
     global_prior_survival: dict[int, float] = field(default_factory=dict)
     prior_blend_weight: float = 0.0
     fitted: bool = False
@@ -100,11 +103,17 @@ class IntradayMLSurvivalCalibrator:
             int(hour): self._empirical_prior(frame)
             for hour, frame in calibration_rows.groupby("issue_hour_utc")
         }
+        self.contextual_prior_survival, self.context_rows = self._contextual_priors(calibration_rows)
         self.fitted = any(model is not None for model in self.threshold_calibrators.values())
         self.prior_blend_weight = self._fit_prior_blend_weight(calibration_rows) if self.fitted else 0.0
         return self
 
-    def transform(self, survival: dict[int, float], issue_hour_utc: int | None = None) -> dict[int, float]:
+    def transform(
+        self,
+        survival: dict[int, float],
+        issue_hour_utc: int | None = None,
+        context: dict[str, str] | None = None,
+    ) -> dict[int, float]:
         if not self.fitted:
             return {key: float(np.clip(value, 0.0, 1.0)) for key, value in survival.items()}
         calibrated = []
@@ -113,7 +122,7 @@ class IntradayMLSurvivalCalibrator:
             model = self.threshold_calibrators.get(threshold)
             value = raw if model is None else float(model.predict(np.array([raw], dtype=float))[0])
             calibrated.append(value)
-        prior = self.hourly_prior_survival.get(int(issue_hour_utc)) if issue_hour_utc is not None else None
+        prior = self._select_prior(issue_hour_utc, context)
         prior = prior or self.global_prior_survival
         calibrated = [
             (1.0 - self.prior_blend_weight) * value + self.prior_blend_weight * prior.get(threshold, 0.0)
@@ -124,14 +133,17 @@ class IntradayMLSurvivalCalibrator:
 
     def to_metadata(self) -> dict:
         return {
-            "calibration_method": "out_of_fold_isotonic_survival",
+            "calibration_method": "contextual_out_of_fold_isotonic_survival",
             "max_upside_c": self.max_upside_c,
             "min_rows_per_threshold": self.min_rows_per_threshold,
             "fitted": self.fitted,
             "prior_blend_weight": self.prior_blend_weight,
             "prior_smoothing": self.prior_smoothing,
             "max_prior_blend_weight": self.max_prior_blend_weight,
+            "min_context_rows": self.min_context_rows,
             "threshold_rows": {str(key): int(value) for key, value in self.threshold_rows.items()},
+            "context_rows": {str(key): int(value) for key, value in self.context_rows.items()},
+            "context_count": len(self.context_rows),
             "calibrated_thresholds": [
                 int(key) for key, model in self.threshold_calibrators.items() if model is not None
             ],
@@ -146,6 +158,52 @@ class IntradayMLSurvivalCalibrator:
             threshold: float(probabilities[threshold:].sum())
             for threshold in range(1, self.max_upside_c + 1)
         }
+
+    def _contextual_priors(self, frame: pd.DataFrame) -> tuple[dict[str, dict[int, float]], dict[str, int]]:
+        if frame.empty:
+            return {}, {}
+        enriched = frame.copy()
+        if "phase" not in enriched.columns:
+            enriched["phase"] = enriched.apply(lambda row: infer_intraday_ml_context(row)["phase"], axis=1)
+        if "season" not in enriched.columns:
+            enriched["season"] = enriched.apply(lambda row: infer_intraday_ml_context(row)["season"], axis=1)
+        if "weather_regime" not in enriched.columns:
+            enriched["weather_regime"] = enriched.apply(lambda row: infer_intraday_ml_context(row)["weather_regime"], axis=1)
+        priors: dict[str, dict[int, float]] = {}
+        counts: dict[str, int] = {}
+        group_specs = [
+            ("phase|season|weather_regime", ["phase", "season", "weather_regime"]),
+            ("phase|season", ["phase", "season"]),
+            ("phase", ["phase"]),
+        ]
+        for prefix, columns in group_specs:
+            for keys, group in enriched.groupby(columns, dropna=False):
+                keys = keys if isinstance(keys, tuple) else (keys,)
+                if len(group) < self.min_context_rows:
+                    continue
+                key = prefix + ":" + "|".join(str(value) for value in keys)
+                priors[key] = self._empirical_prior(group)
+                counts[key] = len(group)
+        return priors, counts
+
+    def _select_prior(self, issue_hour_utc: int | None, context: dict[str, str] | None) -> dict[int, float] | None:
+        context = context or {}
+        phase = context.get("phase")
+        season = context.get("season")
+        weather_regime = context.get("weather_regime")
+        candidates = []
+        if phase and season and weather_regime:
+            candidates.append(f"phase|season|weather_regime:{phase}|{season}|{weather_regime}")
+        if phase and season:
+            candidates.append(f"phase|season:{phase}|{season}")
+        if phase:
+            candidates.append(f"phase:{phase}")
+        for key in candidates:
+            if key in self.contextual_prior_survival:
+                return self.contextual_prior_survival[key]
+        if issue_hour_utc is not None:
+            return self.hourly_prior_survival.get(int(issue_hour_utc))
+        return None
 
     def _fit_prior_blend_weight(self, frame: pd.DataFrame) -> float:
         raw = np.column_stack(
@@ -163,10 +221,20 @@ class IntradayMLSurvivalCalibrator:
         priors = np.vstack(
             [
                 [
-                    self.hourly_prior_survival.get(int(hour), self.global_prior_survival).get(threshold, 0.0)
+                    (
+                        self._select_prior(
+                        int(row["issue_hour_utc"]),
+                        {
+                            "phase": str(row.get("phase", "")),
+                            "season": str(row.get("season", "")),
+                            "weather_regime": str(row.get("weather_regime", "")),
+                        },
+                        )
+                        or self.global_prior_survival
+                    ).get(threshold, 0.0)
                     for threshold in range(1, self.max_upside_c + 1)
                 ]
-                for hour in frame["issue_hour_utc"]
+                for _, row in frame.iterrows()
             ]
         )
         actual_bins = np.clip(
@@ -192,9 +260,10 @@ class IntradayMLSurvivalCalibrator:
         self,
         survival: dict[int, float],
         issue_hour_utc: int | None,
+        context: dict[str, str] | None,
         prior_blend_weight: float,
     ) -> dict[int, float]:
-        prior = self.hourly_prior_survival.get(int(issue_hour_utc)) if issue_hour_utc is not None else None
+        prior = self._select_prior(issue_hour_utc, context)
         prior = prior or self.global_prior_survival
         calibrated = []
         for threshold in range(1, self.max_upside_c + 1):
@@ -265,7 +334,11 @@ class IntradayMLUpsideModel:
         observed_max = _required_float(feature_row, "observed_max_so_far_from_metar")
         raw_survival = self.predict_upside_survival(feature_row)
         survival = (
-            self.calibrator.transform(raw_survival, issue_hour_utc=feature_row.get("issue_hour_utc"))
+            self.calibrator.transform(
+                raw_survival,
+                issue_hour_utc=feature_row.get("issue_hour_utc"),
+                context=infer_intraday_ml_context(feature_row),
+            )
             if self.calibrator is not None
             else raw_survival
         )
@@ -277,11 +350,12 @@ class IntradayMLUpsideModel:
             "name": "intraday_ml_core_challenger_v1",
             "training_rows": self.training_rows,
             "calibration_status": (
-                "out_of_fold_isotonic_survival_calibrated"
+                "contextual_out_of_fold_survival_calibrated"
                 if self.calibrator is not None and self.calibrator.fitted
                 else "uncalibrated"
             ),
             "calibration_metadata": None if self.calibrator is None else self.calibrator.to_metadata(),
+            "calibration_context": infer_intraday_ml_context(feature_row),
             "observed_max_so_far_c": observed_max,
             "probability_peak_already_passed": float(probs[0]),
             "probability_upside_ge_1c": survival[1],
@@ -318,6 +392,59 @@ def prepare_intraday_ml_dataset(dataset: pd.DataFrame) -> pd.DataFrame:
     for threshold in (1, 2, 3):
         frame[f"upside_ge_{threshold}c"] = frame["remaining_upside_c"] >= threshold
     return frame.reset_index(drop=True)
+
+
+def infer_intraday_ml_context(row: dict | pd.Series) -> dict[str, str]:
+    """Context used only for shadow calibration, not for leakage-prone target shaping."""
+
+    issue_hour = int(_optional_float(row, "issue_hour_utc", 12.0))
+    month = int(_optional_float(row, "month", 1.0))
+    last_temp = _optional_float(row, "last_metar_temp_c")
+    observed_max = _optional_float(row, "observed_max_so_far_from_metar")
+    drop_from_max = 0.0 if last_temp is None or observed_max is None else max(0.0, observed_max - last_temp)
+    phase = _intraday_phase(issue_hour)
+    season = "warm" if month in {4, 5, 6, 7, 8, 9} else "cool"
+    weather_regime = _weather_regime(row, issue_hour, drop_from_max)
+    return {
+        "phase": phase,
+        "season": season,
+        "weather_regime": weather_regime,
+    }
+
+
+def _intraday_phase(issue_hour_utc: int) -> str:
+    if issue_hour_utc < 9:
+        return "morning"
+    if issue_hour_utc < 15:
+        return "daytime"
+    return "evening"
+
+
+def _weather_regime(row: dict | pd.Series, issue_hour_utc: int, drop_from_max: float) -> str:
+    has_metar_adverse = any(
+        bool(_optional_float(row, key, 0.0))
+        for key in ("has_precip_recent", "has_fog_recent", "has_thunder_recent")
+    )
+    model_precip = _optional_float(row, "model_precip_sum", 0.0) or 0.0
+    model_cloud = _optional_float(row, "model_cloud_cover_mean", 0.0) or 0.0
+    has_nwp_adverse = model_precip >= 0.5 or model_cloud >= 80.0
+    if issue_hour_utc >= 9 and drop_from_max >= 2.0:
+        return "sharp_drop"
+    if has_metar_adverse and has_nwp_adverse:
+        return "multi_source_adverse"
+    if has_metar_adverse or has_nwp_adverse:
+        return "adverse"
+    return "benign"
+
+
+def _optional_float(row: dict | pd.Series, key: str, default: float | None = None) -> float | None:
+    value = row.get(key, default)
+    if value is None or pd.isna(value):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _numeric_feature_frame(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:

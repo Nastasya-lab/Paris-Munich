@@ -95,7 +95,7 @@ def format_prediction(
     ml_details = ml_shadow.get("details") or {}
     ml_final = ml_shadow.get("final_model") or {}
     if ml_shadow:
-        ml_calibrated = ml_details.get("calibration_status") == "out_of_fold_isotonic_survival_calibrated"
+        ml_calibrated = ml_details.get("calibration_status") == "contextual_out_of_fold_survival_calibrated"
         lines += [
             "",
             "ML shadow scenario: remaining-upside challenger",
