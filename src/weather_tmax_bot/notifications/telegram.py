@@ -241,10 +241,16 @@ def _format_ml_shadow_summary(components: dict) -> list[str]:
         return []
     details = shadow.get("details") or {}
     final_model = shadow.get("final_model") or {}
+    calibration_status = str(details.get("calibration_status", "unknown"))
+    calibration_note = (
+        "Предварительная ML-модель. Не влияет на основной прогноз; вероятности проходят отдельную out-of-fold калибровку."
+        if calibration_status == "out_of_fold_isotonic_survival_calibrated"
+        else "Предварительная ML-модель. Не влияет на основной прогноз; последний калибратор проверен, но не включен из-за gate."
+    )
     lines = [
         "",
         "<b>ML shadow: remaining upside</b>",
-        "Предварительная ML-модель. Не влияет на основной прогноз и пока не откалибрована.",
+        calibration_note,
     ]
     if not details.get("active"):
         lines.append(f"Статус: неактивна ({escape(str(details.get('reason', 'нет данных')))})")
@@ -252,6 +258,7 @@ def _format_ml_shadow_summary(components: dict) -> list[str]:
     lines.extend(
         [
             f"Ожидаемый максимум: {float(final_model.get('expected_tmax_c', 0.0)):.1f} °C",
+            f"Калибровка: {escape(calibration_status)}",
             f"Вероятность, что пик уже был: {float(details.get('probability_peak_already_passed', 0.0)):.1%}",
             f"Шанс роста еще минимум на +1 °C: {float(details.get('probability_upside_ge_1c', 0.0)):.1%}",
             f"Шанс роста еще минимум на +2 °C: {float(details.get('probability_upside_ge_2c', 0.0)):.1%}",

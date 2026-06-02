@@ -1,6 +1,10 @@
 import pandas as pd
 
-from weather_tmax_bot.models.intraday_ml import IntradayMLUpsideModel, prepare_intraday_ml_dataset
+from weather_tmax_bot.models.intraday_ml import (
+    IntradayMLSurvivalCalibrator,
+    IntradayMLUpsideModel,
+    prepare_intraday_ml_dataset,
+)
 
 
 def test_prepare_intraday_ml_dataset_builds_remaining_upside_labels():
@@ -50,3 +54,65 @@ def test_intraday_ml_predicts_monotonic_survival_and_distribution():
     assert abs(dist.probabilities.sum() - 1.0) < 1e-6
     assert dist.bins_c.min() == 20
     assert details["active"] is True
+
+
+def test_intraday_ml_survival_calibrator_preserves_ordinal_monotonicity():
+    calibration_rows = pd.DataFrame(
+        {
+            "issue_hour_utc": [12, 12, 12, 12],
+            "remaining_upside_c": [0.0, 1.0, 2.0, 3.0],
+            "raw_probability_upside_ge_1c": [0.1, 0.3, 0.7, 0.9],
+            "actual_upside_ge_1c": [0.0, 0.0, 1.0, 1.0],
+            "raw_probability_upside_ge_2c": [0.05, 0.2, 0.5, 0.8],
+            "actual_upside_ge_2c": [0.0, 0.0, 0.0, 1.0],
+            "raw_probability_upside_ge_3c": [0.01, 0.1, 0.4, 0.7],
+            "actual_upside_ge_3c": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+    calibrator = IntradayMLSurvivalCalibrator(max_upside_c=3, min_rows_per_threshold=4).fit(calibration_rows)
+
+    calibrated = calibrator.transform({1: 0.8, 2: 0.75, 3: 0.7})
+
+    values = list(calibrated.values())
+    assert calibrator.fitted is True
+    assert all(0.0 <= value <= 1.0 for value in values)
+    assert all(left >= right for left, right in zip(values, values[1:]))
+
+
+def test_intraday_ml_reports_when_oof_calibration_is_applied():
+    rows = []
+    for idx in range(80):
+        rows.append(
+            {
+                "target_date_local": f"2026-01-{idx % 28 + 1:02d}",
+                "issue_time_utc": f"2026-01-{idx % 28 + 1:02d}T12:00:00Z",
+                "issue_hour_utc": 12,
+                "month": 1,
+                "doy_sin": 0.0,
+                "doy_cos": 1.0,
+                "tmax_c": 20.0 + idx % 5,
+                "observed_max_so_far_from_metar": 20.0,
+                "last_metar_temp_c": 19.0,
+                "leakage_check_passed": True,
+            }
+        )
+    model = IntradayMLUpsideModel(max_upside_c=3, min_rows=40).fit(pd.DataFrame(rows))
+    model.calibrator = IntradayMLSurvivalCalibrator(max_upside_c=3, min_rows_per_threshold=4).fit(
+        pd.DataFrame(
+            {
+                "issue_hour_utc": [12, 12, 12, 12],
+                "remaining_upside_c": [0.0, 1.0, 2.0, 3.0],
+                "raw_probability_upside_ge_1c": [0.1, 0.3, 0.7, 0.9],
+                "actual_upside_ge_1c": [0.0, 0.0, 1.0, 1.0],
+                "raw_probability_upside_ge_2c": [0.05, 0.2, 0.5, 0.8],
+                "actual_upside_ge_2c": [0.0, 0.0, 0.0, 1.0],
+                "raw_probability_upside_ge_3c": [0.01, 0.1, 0.4, 0.7],
+                "actual_upside_ge_3c": [0.0, 0.0, 0.0, 1.0],
+            }
+        )
+    )
+
+    _, details = model.predict_distribution(rows[0])
+
+    assert details["calibration_status"] == "out_of_fold_isotonic_survival_calibrated"
+    assert "raw_probability_upside_ge_1c" in details

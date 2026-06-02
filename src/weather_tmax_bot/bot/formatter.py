@@ -95,15 +95,21 @@ def format_prediction(
     ml_details = ml_shadow.get("details") or {}
     ml_final = ml_shadow.get("final_model") or {}
     if ml_shadow:
+        ml_calibrated = ml_details.get("calibration_status") == "out_of_fold_isotonic_survival_calibrated"
         lines += [
             "",
             "ML shadow scenario: remaining-upside challenger",
-            "- shadow only: preliminary uncalibrated and does not affect the operational forecast",
+            (
+                "- shadow only: preliminary calibrated challenger and does not affect the operational forecast"
+                if ml_calibrated
+                else "- shadow only: raw challenger; latest calibration candidate was not accepted by the gate"
+            ),
             f"- active: {ml_details.get('active')}",
         ]
         if ml_details.get("active"):
             lines.extend(
                 [
+                    f"- calibration: {ml_details.get('calibration_status', 'unknown')}",
                     f"- expected Tmax: {_fmt_component_expected(ml_final)}",
                     f"- P(peak already passed): {100 * float(ml_details.get('probability_peak_already_passed', 0.0)):.1f}%",
                     f"- P(upside >= +1C): {100 * float(ml_details.get('probability_upside_ge_1c', 0.0)):.1f}%",

@@ -11,7 +11,11 @@ import pandas as pd
 from weather_tmax_bot.data.storage import write_parquet
 from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, mae, nll_integer_bin, rmse
 from weather_tmax_bot.models.distribution import TmaxDistribution
-from weather_tmax_bot.models.intraday_ml import IntradayMLUpsideModel, prepare_intraday_ml_dataset
+from weather_tmax_bot.models.intraday_ml import (
+    IntradayMLSurvivalCalibrator,
+    IntradayMLUpsideModel,
+    prepare_intraday_ml_dataset,
+)
 from weather_tmax_bot.utils.hashing import stable_hash
 
 VERSION = "intraday_ml_core_challenger_v1"
@@ -31,7 +35,11 @@ def main() -> None:
     summary = _group_summary(scored, ["model_variant"])
     by_hour = _group_summary(scored, ["model_variant", "issue_hour_utc"])
     by_fold = _group_summary(scored, ["model_variant", "fold_start"])
+    calibration_rows, calibration_folds = _build_oof_calibration_rows(usable)
+    final_calibrator = IntradayMLSurvivalCalibrator().fit(calibration_rows)
+    calibration_deployment = _calibration_deployment_decision(summary)
     model = IntradayMLUpsideModel().fit(usable)
+    model.calibrator = final_calibrator if calibration_deployment["accepted"] else None
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     metadata = {
@@ -40,6 +48,11 @@ def main() -> None:
         "mode": "shadow_only",
         "training_period": [str(usable["target_date_local"].min()), str(usable["target_date_local"].max())],
         "training_rows": len(usable),
+        "calibration_version": "intraday_ml_survival_isotonic_oof_v1",
+        "calibration_rows": len(calibration_rows),
+        "calibration_metadata": final_calibrator.to_metadata(),
+        "calibration_deployment": calibration_deployment,
+        "calibration_folds": calibration_folds,
         "feature_set_version": "intraday_ml_core.v1",
         "feature_columns": model.feature_columns,
         "data_snapshot_hash": stable_hash({"rows": len(usable), "target_sum": float(usable["tmax_c"].sum())}),
@@ -49,6 +62,7 @@ def main() -> None:
         "limitations": [
             "Historical TAF archive is empty, so TAF values degrade to missing flags during training.",
             "ICON-D2 features are optional because honest historical NWP overlap starts in late May 2025.",
+            "Calibration is learned from historical out-of-fold predictions, but the challenger remains shadow-only.",
             "This artifact is shadow-only and is not registered as the active production model.",
         ],
     }
@@ -67,21 +81,99 @@ def _rolling_backtest(dataset: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
     folds = []
     for fold_start in pd.date_range("2025-08-01", "2025-12-01", freq="MS").date:
         fold_end = (pd.Timestamp(fold_start) + pd.offsets.MonthEnd(1)).date()
+        calibration_start = (pd.Timestamp(fold_start) - pd.Timedelta(days=90)).date()
+        train_core = dataset[dataset["target_date_local"] < calibration_start].copy()
+        calibration = dataset[
+            (dataset["target_date_local"] >= calibration_start) & (dataset["target_date_local"] < fold_start)
+        ].copy()
         train = dataset[dataset["target_date_local"] < fold_start].copy()
         test = dataset[(dataset["target_date_local"] >= fold_start) & (dataset["target_date_local"] <= fold_end)].copy()
-        if len(train) < 300 or test.empty:
-            folds.append({"fold_start": fold_start.isoformat(), "fold_end": fold_end.isoformat(), "status": "skipped", "train_rows": len(train), "test_rows": len(test)})
+        if len(train_core) < 300 or len(calibration) < 100 or test.empty:
+            folds.append({
+                "fold_start": fold_start.isoformat(),
+                "fold_end": fold_end.isoformat(),
+                "status": "skipped",
+                "train_core_rows": len(train_core),
+                "calibration_rows": len(calibration),
+                "train_rows": len(train),
+                "test_rows": len(test),
+            })
             continue
-        model = IntradayMLUpsideModel().fit(train)
+        model = IntradayMLUpsideModel().fit(train_core)
+        calibrator = IntradayMLSurvivalCalibrator(max_upside_c=model.max_upside_c).fit(
+            _survival_calibration_rows(model, calibration)
+        )
         for _, row in test.iterrows():
             dist, details = model.predict_distribution(row.to_dict())
             baseline_dist, baseline_details = _empirical_upside_distribution(train, row)
-            rows.append(_score("intraday_ml_core_challenger_v1", row, dist, details, fold_start))
+            rows.append(_score("intraday_ml_core_challenger_v1_raw", row, dist, details, fold_start))
+            model.calibrator = calibrator
+            calibrated_dist, calibrated_details = model.predict_distribution(row.to_dict())
+            model.calibrator = None
+            rows.append(_score("intraday_ml_core_challenger_v1", row, calibrated_dist, calibrated_details, fold_start))
             rows.append(_score("empirical_hourly_upside_baseline", row, baseline_dist, baseline_details, fold_start))
-        folds.append({"fold_start": fold_start.isoformat(), "fold_end": fold_end.isoformat(), "status": "evaluated", "train_rows": len(train), "test_rows": len(test)})
+        folds.append({
+            "fold_start": fold_start.isoformat(),
+            "fold_end": fold_end.isoformat(),
+            "status": "evaluated",
+            "train_core_rows": len(train_core),
+            "calibration_rows": len(calibration),
+            "train_rows": len(train),
+            "test_rows": len(test),
+            "calibrated_thresholds": calibrator.to_metadata()["calibrated_thresholds"],
+        })
     if not rows:
         raise ValueError("intraday ML rolling backtest found no evaluable folds")
     return pd.DataFrame(rows), folds
+
+
+def _build_oof_calibration_rows(dataset: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
+    rows = []
+    folds = []
+    for fold_start in pd.date_range("2024-03-01", "2025-12-01", freq="3MS").date:
+        fold_end = (pd.Timestamp(fold_start) + pd.offsets.MonthEnd(1)).date()
+        train = dataset[dataset["target_date_local"] < fold_start].copy()
+        holdout = dataset[(dataset["target_date_local"] >= fold_start) & (dataset["target_date_local"] <= fold_end)].copy()
+        if len(train) < 300 or holdout.empty:
+            folds.append({
+                "fold_start": fold_start.isoformat(),
+                "fold_end": fold_end.isoformat(),
+                "status": "skipped",
+                "train_rows": len(train),
+                "holdout_rows": len(holdout),
+            })
+            continue
+        model = IntradayMLUpsideModel().fit(train)
+        frame = _survival_calibration_rows(model, holdout)
+        rows.append(frame)
+        folds.append({
+            "fold_start": fold_start.isoformat(),
+            "fold_end": fold_end.isoformat(),
+            "status": "evaluated",
+            "train_rows": len(train),
+            "holdout_rows": len(holdout),
+        })
+    if not rows:
+        raise ValueError("could not build out-of-fold intraday ML calibration rows")
+    return pd.concat(rows, ignore_index=True), folds
+
+
+def _survival_calibration_rows(model: IntradayMLUpsideModel, frame: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for _, row in frame.iterrows():
+        survival = model.predict_upside_survival(row.to_dict())
+        remaining_upside = float(row["remaining_upside_c"])
+        out = {
+            "target_date_local": row["target_date_local"].isoformat(),
+            "issue_time_utc": pd.Timestamp(row["issue_time_utc"]).isoformat(),
+            "issue_hour_utc": int(row["issue_hour_utc"]),
+            "remaining_upside_c": remaining_upside,
+        }
+        for threshold in range(1, model.max_upside_c + 1):
+            out[f"raw_probability_upside_ge_{threshold}c"] = float(survival[threshold])
+            out[f"actual_upside_ge_{threshold}c"] = float(remaining_upside >= threshold)
+        rows.append(out)
+    return pd.DataFrame(rows)
 
 
 def _score(model_variant: str, row: pd.Series, dist: TmaxDistribution, details: dict, fold_start) -> dict:
@@ -142,6 +234,29 @@ def _summary(scored: pd.DataFrame) -> dict:
     }
 
 
+def _calibration_deployment_decision(summary: pd.DataFrame) -> dict:
+    indexed = summary.set_index("model_variant")
+    raw = indexed.loc["intraday_ml_core_challenger_v1_raw"]
+    calibrated = indexed.loc["intraday_ml_core_challenger_v1"]
+    checks = {
+        "nll_not_worse": float(calibrated["mean_nll"]) <= float(raw["mean_nll"]),
+        "coverage_80_not_worse": float(calibrated["coverage_80"]) >= float(raw["coverage_80"]),
+        "mae_degradation_within_25pct": float(calibrated["mae_expected"]) <= 1.25 * float(raw["mae_expected"]),
+        "crps_degradation_within_20pct": float(calibrated["mean_crps"]) <= 1.20 * float(raw["mean_crps"]),
+        "false_upside_increase_within_8pp": float(calibrated["mean_false_upside_probability"])
+        <= float(raw["mean_false_upside_probability"]) + 0.08,
+    }
+    return {
+        "accepted": all(checks.values()),
+        "checks": checks,
+        "raw": {key: float(raw[key]) for key in ("mae_expected", "mean_nll", "mean_crps", "coverage_80", "mean_false_upside_probability")},
+        "calibrated": {
+            key: float(calibrated[key])
+            for key in ("mae_expected", "mean_nll", "mean_crps", "coverage_80", "mean_false_upside_probability")
+        },
+    }
+
+
 def _group_summary(scored: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     rows = []
     for keys, group in scored.groupby(columns, dropna=False):
@@ -164,7 +279,11 @@ def _doc(metadata: dict, by_hour: pd.DataFrame, by_fold: pd.DataFrame) -> str:
         "",
         f"- model version: `{metadata['model_version']}`",
         f"- training rows: `{metadata['training_rows']}`",
+        f"- calibration rows: `{metadata['calibration_rows']}`",
+        f"- calibration version: `{metadata['calibration_version']}`",
+        f"- calibration deployment accepted: `{metadata['calibration_deployment']['accepted']}`",
         f"- training period: `{metadata['training_period'][0]}` to `{metadata['training_period'][1]}`",
+        f"- calibrated thresholds: `{metadata['calibration_metadata']['calibrated_thresholds']}`",
         "## Rolling comparison",
         "",
         _table(pd.DataFrame(summary)),

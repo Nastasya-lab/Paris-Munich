@@ -99,8 +99,13 @@ def predict_best_available(
             },
         }
         if ml_shadow_dist is not None:
+            ml_calibrated = ml_shadow_details.get("calibration_status") == "out_of_fold_isotonic_survival_calibrated"
             feature_row["forecast_variants"]["shadow_intraday_ml"] = {
-                "description": "Preliminary uncalibrated ordinal remaining-upside ML shadow challenger.",
+                "description": (
+                    "Preliminary calibrated ordinal remaining-upside ML shadow challenger."
+                    if ml_calibrated
+                    else "Preliminary raw ordinal remaining-upside ML shadow challenger; calibration gate did not accept the latest candidate."
+                ),
                 "distribution": ml_shadow_dist.to_payload(),
                 "metadata": {
                     "variant_version": "intraday_ml_core_challenger_v1",
@@ -131,7 +136,11 @@ def predict_best_available(
             },
             "ml_shadow_mode": {
                 "name": "intraday_ml_core_challenger_v1",
-                "status": "shadow_only_preliminary_uncalibrated_does_not_affect_operational_forecast",
+                "status": (
+                    "shadow_only_preliminary_calibrated_does_not_affect_operational_forecast"
+                    if ml_shadow_details.get("calibration_status") == "out_of_fold_isotonic_survival_calibrated"
+                    else "shadow_only_preliminary_raw_calibration_candidate_rejected_does_not_affect_operational_forecast"
+                ),
                 "details": ml_shadow_details,
                 "final_model": None if ml_shadow_dist is None else ml_shadow_dist.to_payload(),
                 "comparison_to_champion": None if ml_shadow_dist is None else _distribution_comparison(ml_shadow_dist, dist),

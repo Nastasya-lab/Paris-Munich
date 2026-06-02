@@ -7,6 +7,142 @@
     "2025-12-30"
   ],
   "training_rows": 15299,
+  "calibration_version": "intraday_ml_survival_isotonic_oof_v1",
+  "calibration_rows": 1701,
+  "calibration_metadata": {
+    "calibration_method": "out_of_fold_isotonic_survival",
+    "max_upside_c": 20,
+    "min_rows_per_threshold": 200,
+    "fitted": true,
+    "prior_blend_weight": 0.35,
+    "prior_smoothing": 1.0,
+    "max_prior_blend_weight": 0.35,
+    "threshold_rows": {
+      "1": 1701,
+      "2": 1701,
+      "3": 1701,
+      "4": 1701,
+      "5": 1701,
+      "6": 1701,
+      "7": 1701,
+      "8": 1701,
+      "9": 1701,
+      "10": 1701,
+      "11": 1701,
+      "12": 1701,
+      "13": 1701,
+      "14": 1701,
+      "15": 1701,
+      "16": 1701,
+      "17": 1701,
+      "18": 1701,
+      "19": 1701,
+      "20": 1701
+    },
+    "calibrated_thresholds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ]
+  },
+  "calibration_deployment": {
+    "accepted": false,
+    "checks": {
+      "nll_not_worse": false,
+      "coverage_80_not_worse": true,
+      "mae_degradation_within_25pct": true,
+      "crps_degradation_within_20pct": true,
+      "false_upside_increase_within_8pp": true
+    },
+    "raw": {
+      "mae_expected": 1.4253248749080072,
+      "mean_nll": 4.522290537395477,
+      "mean_crps": 0.05195024890984379,
+      "coverage_80": 0.5785512699905927,
+      "mean_false_upside_probability": 0.33573228828664264
+    },
+    "calibrated": {
+      "mae_expected": 1.7365550598683963,
+      "mean_nll": 4.645358172450836,
+      "mean_crps": 0.05269490138478966,
+      "coverage_80": 0.6368767638758231,
+      "mean_false_upside_probability": 0.3765868169051985
+    }
+  },
+  "calibration_folds": [
+    {
+      "fold_start": "2024-03-01",
+      "fold_end": "2024-03-31",
+      "status": "evaluated",
+      "train_rows": 10645,
+      "holdout_rows": 217
+    },
+    {
+      "fold_start": "2024-06-01",
+      "fold_end": "2024-06-30",
+      "status": "evaluated",
+      "train_rows": 11289,
+      "holdout_rows": 210
+    },
+    {
+      "fold_start": "2024-09-01",
+      "fold_end": "2024-09-30",
+      "status": "evaluated",
+      "train_rows": 11933,
+      "holdout_rows": 210
+    },
+    {
+      "fold_start": "2024-12-01",
+      "fold_end": "2024-12-31",
+      "status": "evaluated",
+      "train_rows": 12570,
+      "holdout_rows": 217
+    },
+    {
+      "fold_start": "2025-03-01",
+      "fold_end": "2025-03-31",
+      "status": "evaluated",
+      "train_rows": 13200,
+      "holdout_rows": 217
+    },
+    {
+      "fold_start": "2025-06-01",
+      "fold_end": "2025-06-30",
+      "status": "evaluated",
+      "train_rows": 13844,
+      "holdout_rows": 210
+    },
+    {
+      "fold_start": "2025-09-01",
+      "fold_end": "2025-09-30",
+      "status": "evaluated",
+      "train_rows": 14452,
+      "holdout_rows": 210
+    },
+    {
+      "fold_start": "2025-12-01",
+      "fold_end": "2025-12-31",
+      "status": "evaluated",
+      "train_rows": 15089,
+      "holdout_rows": 210
+    }
+  ],
   "feature_set_version": "intraday_ml_core.v1",
   "feature_columns": [
     "issue_hour_utc",
@@ -59,7 +195,7 @@
     "model_relative_humidity_mean"
   ],
   "data_snapshot_hash": "3fb37617f752a11ea7fe82650d0692ecdb165e64747054b273db48d3ffed1ef0",
-  "created_at_utc": "2026-06-02T06:35:18.655543+00:00",
+  "created_at_utc": "2026-06-02T07:45:51.212579+00:00",
   "rolling_backtest": [
     {
       "model_variant": "empirical_hourly_upside_baseline",
@@ -81,17 +217,33 @@
       "model_variant": "intraday_ml_core_challenger_v1",
       "rows": 1063,
       "distinct_target_days": 152,
-      "mae_expected": 1.3664151369,
-      "rmse_expected": 2.1155668255,
-      "bias_expected": -0.4027892968,
-      "mean_nll": 5.3040056927,
-      "mean_crps": 0.0526828705,
-      "brier_peak_already_passed": 0.1019370575,
-      "brier_upside_ge_1c": 0.0899851557,
-      "brier_upside_ge_2c": 0.0831543603,
-      "brier_upside_ge_3c": 0.084979393,
-      "coverage_80": 0.5305738476,
-      "mean_false_upside_probability": 0.2927323452
+      "mae_expected": 1.7365550599,
+      "rmse_expected": 2.3592352589,
+      "bias_expected": 0.5302046221,
+      "mean_nll": 4.6453581725,
+      "mean_crps": 0.0526949014,
+      "brier_peak_already_passed": 0.0946776451,
+      "brier_upside_ge_1c": 0.0960956667,
+      "brier_upside_ge_2c": 0.0968141334,
+      "brier_upside_ge_3c": 0.0986376585,
+      "coverage_80": 0.6368767639,
+      "mean_false_upside_probability": 0.3765868169
+    },
+    {
+      "model_variant": "intraday_ml_core_challenger_v1_raw",
+      "rows": 1063,
+      "distinct_target_days": 152,
+      "mae_expected": 1.4253248749,
+      "rmse_expected": 2.185665695,
+      "bias_expected": -0.0432517802,
+      "mean_nll": 4.5222905374,
+      "mean_crps": 0.0519502489,
+      "brier_peak_already_passed": 0.0996921936,
+      "brier_upside_ge_1c": 0.0892865072,
+      "brier_upside_ge_2c": 0.0876979045,
+      "brier_upside_ge_3c": 0.089689678,
+      "coverage_80": 0.57855127,
+      "mean_false_upside_probability": 0.3357322883
     }
   ],
   "folds": [
@@ -99,41 +251,157 @@
       "fold_start": "2025-08-01",
       "fold_end": "2025-08-31",
       "status": "evaluated",
+      "train_core_rows": 13641,
+      "calibration_rows": 595,
       "train_rows": 14236,
-      "test_rows": 216
+      "test_rows": 216,
+      "calibrated_thresholds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ]
     },
     {
       "fold_start": "2025-09-01",
       "fold_end": "2025-09-30",
       "status": "evaluated",
+      "train_core_rows": 13858,
+      "calibration_rows": 594,
       "train_rows": 14452,
-      "test_rows": 210
+      "test_rows": 210,
+      "calibrated_thresholds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ]
     },
     {
       "fold_start": "2025-10-01",
       "fold_end": "2025-10-31",
       "status": "evaluated",
+      "train_core_rows": 14068,
+      "calibration_rows": 594,
       "train_rows": 14662,
-      "test_rows": 217
+      "test_rows": 217,
+      "calibrated_thresholds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17
+      ]
     },
     {
       "fold_start": "2025-11-01",
       "fold_end": "2025-11-30",
       "status": "evaluated",
+      "train_core_rows": 14250,
+      "calibration_rows": 629,
       "train_rows": 14879,
-      "test_rows": 210
+      "test_rows": 210,
+      "calibrated_thresholds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ]
     },
     {
       "fold_start": "2025-12-01",
       "fold_end": "2025-12-31",
       "status": "evaluated",
+      "train_core_rows": 14459,
+      "calibration_rows": 630,
       "train_rows": 15089,
-      "test_rows": 210
+      "test_rows": 210,
+      "calibrated_thresholds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ]
     }
   ],
   "limitations": [
     "Historical TAF archive is empty, so TAF values degrade to missing flags during training.",
     "ICON-D2 features are optional because honest historical NWP overlap starts in late May 2025.",
+    "Calibration is learned from historical out-of-fold predictions, but the challenger remains shadow-only.",
     "This artifact is shadow-only and is not registered as the active production model."
   ]
 }
