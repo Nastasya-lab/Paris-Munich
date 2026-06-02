@@ -21,6 +21,11 @@ Start command:
 python scripts/railway_bootstrap.py && python scripts/10_start_api.py
 ```
 
+The Docker default command is `python scripts/railway_entrypoint.py`. It starts
+the API for the `Munich` service and dispatches cron services by
+`RAILWAY_SERVICE_NAME`, so accidentally leaving a cron service without a custom
+start command will not start another long-running Uvicorn API process.
+
 Environment variables:
 
 ```bash
@@ -98,6 +103,26 @@ Recommended schedule:
 
 This checks pending forecasts, downloads available DWD truth, rebuilds targets, scores completed forecasts, and refreshes reports.
 It also sends the daily Telegram readiness summary, so a separate healthcheck service is optional.
+
+## Cron service: METAR event update
+
+Command:
+
+```bash
+python scripts/33_call_api_job.py metar-event --poll-timeout-seconds 600 --poll-interval-seconds 30
+```
+
+The Docker entrypoint runs this automatically for a service named `metar-cron`.
+The defaults can be overridden with:
+
+```bash
+METAR_POLL_TIMEOUT_SECONDS=600
+METAR_POLL_INTERVAL_SECONDS=30
+```
+
+This lets the job start shortly after the expected `:20`/`:50` METAR issue
+window and poll every 30 seconds for a few minutes without keeping a permanent
+web process alive.
 
 ## Optional cron service: scheduler healthcheck
 

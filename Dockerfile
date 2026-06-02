@@ -20,4 +20,4 @@ RUN python scripts/railway_bootstrap.py
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python scripts/railway_bootstrap.py && python scripts/10_start_api.py"]
+CMD ["python", "scripts/railway_entrypoint.py"]
