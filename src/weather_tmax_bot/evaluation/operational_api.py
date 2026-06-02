@@ -16,6 +16,7 @@ def operational_monitoring_payload(root: str | Path = ".") -> dict:
         "forecast_inventory": _read_table(root / "data/reports/operational_forecast_inventory.parquet"),
         "pending_forecasts": _read_table(root / "data/reports/operational_pending_forecasts.parquet"),
         "shadow_promotion_gate": _read_json(root / "data/reports/shadow_promotion_gate.json"),
+        "safe_blend_promotion_gate": _read_json(root / "data/reports/safe_blend_promotion_gate.json"),
     }
 
 

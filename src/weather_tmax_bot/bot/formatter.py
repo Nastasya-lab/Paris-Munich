@@ -130,6 +130,20 @@ def format_prediction(
             f"- P(Tmax >= 25C) spread: {100 * float(summary.get('ge_25_probability_spread', 0.0)):.1f}%",
             f"- P(Tmax >= 30C) spread: {100 * float(summary.get('ge_30_probability_spread', 0.0)):.1f}%",
         ]
+    blended_shadow = (forecast_components or {}).get("blended_shadow_mode") or {}
+    blended_details = blended_shadow.get("details") or {}
+    blended_final = blended_shadow.get("final_model") or {}
+    blended_comparison = blended_shadow.get("comparison_to_champion") or {}
+    if blended_shadow:
+        lines += [
+            "",
+            "Safe blended shadow candidate:",
+            "- shadow only: does not affect the operational forecast",
+            "- raw ML probability bins directly mixed: false",
+            f"- phase-shadow blend weight: {100 * float(blended_details.get('blend_weight', 0.0)):.1f}%",
+            f"- expected Tmax: {_fmt_component_expected(blended_final)} ({_fmt_signed_c(blended_comparison.get('expected_tmax_delta_c'))} vs champion)",
+            f"- reasons: {', '.join(str(reason) for reason in blended_details.get('reasons', [])) or 'none'}",
+        ]
     if data_lineage:
         lines.append("")
         lines.append("Data used:")

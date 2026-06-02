@@ -12,6 +12,7 @@ from weather_tmax_bot.models.disagreement import assess_model_disagreement
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
 from weather_tmax_bot.models.intraday_update import apply_intraday_update
 from weather_tmax_bot.models.model_registry import load_model, resolve_active_artifacts
+from weather_tmax_bot.models.safe_blend import build_blended_shadow_candidate
 from weather_tmax_bot.temporal.freshness import assess_feature_freshness
 from weather_tmax_bot.temporal.source_compatibility import assess_source_compatibility
 from weather_tmax_bot.utils.time import local_day_bounds_utc
@@ -77,6 +78,12 @@ def predict_best_available(
         )
         ml_shadow_dist, ml_shadow_details = _predict_intraday_ml_shadow(feature_row)
         dist = intraday.distribution
+        freshness = assess_feature_freshness(feature_row, issue_time_utc)
+        feature_row["freshness"] = freshness["statuses"]
+        warnings.extend(freshness["warnings"])
+        source_compatibility = assess_source_compatibility(feature_row)
+        feature_row["source_compatibility"] = source_compatibility["sources"]
+        warnings.extend(source_compatibility["warnings"])
         feature_row["forecast_variants"] = {
             "production_champion": {
                 "description": "Operational distribution returned to users.",
@@ -115,6 +122,20 @@ def predict_best_available(
             }
         model_disagreement = assess_model_disagreement(feature_row["forecast_variants"])
         feature_row["model_disagreement"] = model_disagreement
+        blended_shadow = build_blended_shadow_candidate(
+            dist,
+            shadow_intraday.distribution,
+            phase_details=shadow_intraday.details,
+            ml_shadow_details=ml_shadow_details,
+            model_disagreement=model_disagreement,
+            source_compatibility=feature_row["source_compatibility"],
+            freshness=feature_row["freshness"],
+        )
+        feature_row["forecast_variants"]["shadow_safe_blend"] = {
+            "description": "Conservative smooth blended shadow candidate; never used as the operational forecast.",
+            "distribution": blended_shadow.distribution.to_payload(),
+            "metadata": blended_shadow.details,
+        }
         feature_row["intraday_update"] = intraday.details
         feature_row["shadow_intraday_update"] = shadow_intraday.details
         feature_row["forecast_components"] = {
@@ -149,6 +170,13 @@ def predict_best_available(
                 "comparison_to_champion": None if ml_shadow_dist is None else _distribution_comparison(ml_shadow_dist, dist),
             },
             "model_disagreement": model_disagreement,
+            "blended_shadow_mode": {
+                "name": "blended_shadow_candidate_v1",
+                "status": "shadow_only_does_not_affect_operational_forecast",
+                "details": blended_shadow.details,
+                "final_model": blended_shadow.distribution.to_payload(),
+                "comparison_to_champion": _distribution_comparison(blended_shadow.distribution, dist),
+            },
         }
         if intraday.details.get("active"):
             warnings.append("Intraday update applied: base prior blended with current METAR/TAF/NWP remaining-day signal.")
@@ -156,12 +184,6 @@ def predict_best_available(
             warnings.append("Quantile MVP model used; calibration layer is still preliminary.")
         else:
             warnings.append(f"{model.__class__.__name__} model used; monitor NWP source availability and residual calibration.")
-        freshness = assess_feature_freshness(feature_row, issue_time_utc)
-        feature_row["freshness"] = freshness["statuses"]
-        warnings.extend(freshness["warnings"])
-        source_compatibility = assess_source_compatibility(feature_row)
-        feature_row["source_compatibility"] = source_compatibility["sources"]
-        warnings.extend(source_compatibility["warnings"])
         if feature_row.get("nwp_missing", True):
             warnings.append("NWP forecast-as-issued archive not yet available.")
         if feature_row.get("taf_missing", True):

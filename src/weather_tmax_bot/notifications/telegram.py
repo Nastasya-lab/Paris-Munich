@@ -92,6 +92,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         *_format_shadow_summary(forecast.get("forecast_components", {})),
         *_format_ml_shadow_summary(forecast.get("forecast_components", {})),
         *_format_model_disagreement(forecast.get("forecast_components", {})),
+        *_format_blended_shadow_summary(forecast.get("forecast_components", {})),
         "",
         "<b>Данные</b>",
         *_format_freshness(refresh),
@@ -311,6 +312,27 @@ def _format_model_disagreement(components: dict) -> list[str]:
     return lines
 
 
+def _format_blended_shadow_summary(components: dict) -> list[str]:
+    shadow = (components or {}).get("blended_shadow_mode") or {}
+    if not shadow:
+        return []
+    details = shadow.get("details") or {}
+    final_model = shadow.get("final_model") or {}
+    comparison = shadow.get("comparison_to_champion") or {}
+    reasons = ", ".join(str(reason) for reason in details.get("reasons", [])) or "нет"
+    return [
+        "",
+        "<b>Безопасный blended shadow</b>",
+        "Не влияет на основной прогноз. Смешивает только гладкие champion и phase-shadow распределения.",
+        f"Ожидаемый максимум: <b>{float(final_model.get('expected_tmax_c', 0.0)):.1f} °C</b> ({_signed_c(comparison.get('expected_tmax_delta_c'))} к основному)",
+        f"Вес phase-shadow: <b>{float(details.get('blend_weight', 0.0)):.1%}</b>",
+        f"ML-сигнал учтен как ограничитель веса: {_yes_no(details.get('ml_signal_used'))}",
+        "Рваное ML-распределение напрямую не смешивается.",
+        f"Главные корзины: {_format_compact_bins(final_model.get('probabilities_by_integer_c', {}), limit=6)}",
+        f"Причины веса: {escape(reasons)}",
+    ]
+
+
 def _signed_c(value: Any) -> str:
     return "нет данных" if value is None else f"{float(value):+.1f} °C"
 
@@ -432,6 +454,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
             )
     lines.extend(_format_ml_shadow_summary(forecast_components))
     lines.extend(_format_model_disagreement(forecast_components))
+    lines.extend(_format_blended_shadow_summary(forecast_components))
     if reasons:
         lines.extend(["", "<b>Почему отправлено</b>", ", ".join(_translate_reason(reason) for reason in reasons)])
     lines.extend(

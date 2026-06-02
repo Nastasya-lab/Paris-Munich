@@ -373,6 +373,40 @@ def test_metar_event_message_includes_model_disagreement_audit():
     assert "ML shadow: 26.0" in text
 
 
+def test_metar_event_message_includes_safe_blended_shadow_candidate():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.4,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {},
+            "probabilities_by_integer_c": {"22": 1.0},
+            "forecast_components": {
+                "intraday_update": {},
+                "blended_shadow_mode": {
+                    "details": {
+                        "blend_weight": 0.35,
+                        "ml_signal_used": True,
+                        "reasons": ["phase_base_weight:midday_update"],
+                    },
+                    "final_model": {
+                        "expected_tmax_c": 22.1,
+                        "probabilities_by_integer_c": {"21": 0.2, "22": 0.7, "23": 0.1},
+                    },
+                    "comparison_to_champion": {"expected_tmax_delta_c": -0.3},
+                },
+            },
+        },
+        {"previous": None, "current": {}, "deltas": {}},
+    )
+
+    assert "Безопасный blended shadow" in text
+    assert "Вес phase-shadow: <b>35.0%</b>" in text
+    assert "Рваное ML-распределение напрямую не смешивается" in text
+
+
 def test_outcome_and_healthcheck_messages_are_russian():
     outcome = telegram.format_outcome_update_message(
         {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}

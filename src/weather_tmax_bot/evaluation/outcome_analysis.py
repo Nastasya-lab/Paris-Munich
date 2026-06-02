@@ -34,6 +34,11 @@ def build_outcome_analysis(
             shadow_variant="shadow_intraday_ml",
             shadow_version="intraday_ml_core_challenger_v1",
         )
+        analysis["safe_blend_promotion_gate"] = evaluate_shadow_promotion_gate(
+            variants,
+            shadow_variant="shadow_safe_blend",
+            shadow_version="blended_shadow_candidate_v1",
+        )
     else:
         analysis["by_forecast_variant"] = []
         analysis["champion_vs_shadow"] = {}
@@ -45,6 +50,11 @@ def build_outcome_analysis(
             pd.DataFrame(),
             shadow_variant="shadow_intraday_ml",
             shadow_version="intraday_ml_core_challenger_v1",
+        )
+        analysis["safe_blend_promotion_gate"] = evaluate_shadow_promotion_gate(
+            pd.DataFrame(),
+            shadow_variant="shadow_safe_blend",
+            shadow_version="blended_shadow_candidate_v1",
         )
     if output_json_path is not None:
         output = Path(output_json_path)
@@ -98,6 +108,15 @@ def format_outcome_analysis_markdown(analysis: dict) -> str:
             f"- `status`: `{ml_gate.get('status')}`",
             f"- `shadow_version`: `{ml_gate.get('shadow_version')}`",
             f"- `recommendation`: `{ml_gate.get('recommendation')}`",
+        ]
+    )
+    safe_blend_gate = analysis.get("safe_blend_promotion_gate", {}) or {}
+    lines.extend(["", "## Safe blended shadow promotion gate", ""])
+    lines.extend(
+        [
+            f"- `status`: `{safe_blend_gate.get('status')}`",
+            f"- `shadow_version`: `{safe_blend_gate.get('shadow_version')}`",
+            f"- `recommendation`: `{safe_blend_gate.get('recommendation')}`",
         ]
     )
     lines.extend(["", "## By variant phase", ""])
@@ -174,6 +193,11 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
             shadow_variant="shadow_intraday_ml",
             shadow_version="intraday_ml_core_challenger_v1",
         ),
+        "safe_blend_promotion_gate": evaluate_shadow_promotion_gate(
+            pd.DataFrame(),
+            shadow_variant="shadow_safe_blend",
+            shadow_version="blended_shadow_candidate_v1",
+        ),
         "by_quality": _group_summary(df, ["forecast_quality_status"]),
         "by_acceptance": _group_summary(df, ["forecast_accepted"]),
         "by_model_disagreement": _group_summary(df, ["model_disagreement_severity"]),
@@ -218,6 +242,11 @@ def _empty_analysis(reason: str) -> dict:
             pd.DataFrame(),
             shadow_variant="shadow_intraday_ml",
             shadow_version="intraday_ml_core_challenger_v1",
+        ),
+        "safe_blend_promotion_gate": evaluate_shadow_promotion_gate(
+            pd.DataFrame(),
+            shadow_variant="shadow_safe_blend",
+            shadow_version="blended_shadow_candidate_v1",
         ),
         "by_quality": [],
         "by_acceptance": [],
