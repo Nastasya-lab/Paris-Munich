@@ -243,17 +243,54 @@ def _load_optional(path: str | Path) -> pd.DataFrame:
 
 def _load_metar_for_issue(airport: str, target_date: date, issue_time_utc: datetime) -> pd.DataFrame:
     frames = []
+    start, _ = local_day_bounds_utc(target_date, "Europe/Berlin")
+    context_start = min(pd.Timestamp(start), pd.Timestamp(issue_time_utc) - pd.Timedelta(hours=24))
+    context_end = pd.Timestamp(issue_time_utc)
     for path in (f"data/interim/metar_iem_{airport}.parquet", f"data/forecasts/awc_metar_live_{airport}.parquet"):
-        df = _load_optional(path)
+        df = _load_metar_context(path, context_start, context_end)
         if not df.empty:
             frames.append(df)
     if not frames:
         return pd.DataFrame()
     metar = pd.concat(frames, ignore_index=True)
-    start, _ = local_day_bounds_utc(target_date, "Europe/Berlin")
-    context_start = min(pd.Timestamp(start), pd.Timestamp(issue_time_utc) - pd.Timedelta(hours=24))
     times = pd.to_datetime(metar["observation_time_utc"], utc=True)
-    return metar[(times >= context_start) & (times <= pd.Timestamp(issue_time_utc))].copy()
+    return metar[(times >= context_start) & (times <= context_end)].copy()
+
+
+def _load_metar_context(path: str | Path, context_start: pd.Timestamp, context_end: pd.Timestamp) -> pd.DataFrame:
+    p = Path(path)
+    if not p.exists():
+        return pd.DataFrame()
+    columns = [
+        "station",
+        "observation_time_utc",
+        "knowledge_time_utc",
+        "source_id",
+        "raw_metar",
+        "temperature_c",
+        "dewpoint_c",
+        "qnh_hpa",
+        "wind_direction_deg",
+        "wind_speed_kt",
+        "gust_kt",
+        "cavok",
+    ]
+    try:
+        return pd.read_parquet(
+            p,
+            columns=columns,
+            filters=[
+                ("observation_time_utc", ">=", context_start.to_pydatetime()),
+                ("observation_time_utc", "<=", context_end.to_pydatetime()),
+            ],
+        )
+    except (KeyError, ValueError, TypeError):
+        df = pd.read_parquet(p)
+        missing = [column for column in columns if column not in df.columns]
+        for column in missing:
+            df[column] = None
+        times = pd.to_datetime(df["observation_time_utc"], utc=True, errors="coerce")
+        return df.loc[(times >= context_start) & (times <= context_end), columns].copy()
 
 
 def _load_nwp_for_issue(target_date: date, issue_time_utc: datetime) -> pd.DataFrame:

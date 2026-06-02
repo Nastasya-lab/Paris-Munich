@@ -68,6 +68,11 @@ window rather than exactly at the model initialisation time. Each run refreshes 
 METAR, TAF, and NWP data, creates a new as-of forecast, logs it, and sends the updated
 forecast to Telegram.
 
+For memory safety on Railway, `forecast-cron` does not rebuild monitoring/outcome
+reports on every run. Those reports are refreshed by `outcome-cron`, which runs much
+less often. If you manually call `/operational-cycle` and want report refresh, pass
+`update_reports=true` explicitly.
+
 The release times are `01:40`, `04:40`, `07:40`, `10:40`, `13:40`, `16:40`, and
 `19:40 UTC`. On May 31 they correspond to `03:40`, `06:40`, `09:40`, `12:40`,
 `15:40`, `18:40`, and `21:40 Europe/Berlin`, or `04:40`, `07:40`, `10:40`,

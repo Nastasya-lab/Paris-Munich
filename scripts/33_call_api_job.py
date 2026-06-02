@@ -37,7 +37,7 @@ def main(
                 "refresh_awc": True,
                 "refresh_nwp": True,
                 "log": True,
-                "update_reports": True,
+                "update_reports": False,
                 "notify": True,
             },
             headers=headers,

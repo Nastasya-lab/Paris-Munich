@@ -95,7 +95,7 @@ def operational_cycle(
     refresh_awc: bool = True,
     refresh_nwp: bool = True,
     log: bool = True,
-    update_reports: bool = True,
+    update_reports: bool = False,
     notify: bool = True,
     api_key: str | None = None,
     x_api_key: str | None = Header(default=None),
