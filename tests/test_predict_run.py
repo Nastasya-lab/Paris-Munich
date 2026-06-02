@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from weather_tmax_bot.operations.predict_run import run_prediction
 from weather_tmax_bot.operations.predict_run import run_prediction_with_optional_refresh
 from weather_tmax_bot.operations.run_report import operational_prediction_payload
+from weather_tmax_bot.models import predict as predict_module
 
 
 def test_run_prediction_with_optional_refresh_without_network():
@@ -72,3 +73,19 @@ def test_operational_prediction_payload_contains_run_report_fields():
     assert payload["forecast_acceptance"] == result["forecast_acceptance"]
     assert payload["forecast_quality"] == result["forecast_quality"]
     assert payload["refresh_summary"]["airport"] == "EDDM"
+
+
+def test_intraday_ml_shadow_load_failure_degrades_without_crashing(tmp_path, monkeypatch):
+    model_path = tmp_path / "intraday_ml.joblib"
+    model_path.write_bytes(b"placeholder")
+
+    def fail_load(path):
+        raise ModuleNotFoundError("No module named '_loss'")
+
+    monkeypatch.setattr(predict_module.joblib, "load", fail_load)
+
+    dist, details = predict_module._predict_intraday_ml_shadow({}, model_path=model_path)
+
+    assert dist is None
+    assert details["active"] is False
+    assert "intraday_ml_prediction_unavailable" in details["reason"]

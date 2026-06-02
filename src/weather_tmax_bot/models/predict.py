@@ -205,7 +205,7 @@ def _predict_intraday_ml_shadow(feature_row: dict, model_path: str | Path = "dat
     try:
         model = joblib.load(path)
         return model.predict_distribution(feature_row)
-    except (ValueError, TypeError) as exc:
+    except (AttributeError, ImportError, ModuleNotFoundError, ValueError, TypeError) as exc:
         return None, {"active": False, "reason": f"intraday_ml_prediction_unavailable: {exc}"}
 
 
