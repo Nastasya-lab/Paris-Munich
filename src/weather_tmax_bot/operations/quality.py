@@ -6,6 +6,7 @@ def assess_forecast_quality(feature_snapshot: dict, warnings: list[str] | None =
     freshness = feature_snapshot.get("freshness", {}) or {}
     extrapolation = feature_snapshot.get("extrapolation", {}) or {}
     source_compatibility = feature_snapshot.get("source_compatibility", {}) or {}
+    model_disagreement = feature_snapshot.get("model_disagreement", {}) or {}
     reasons = []
     cautions = []
     invalid = False
@@ -49,6 +50,12 @@ def assess_forecast_quality(feature_snapshot: dict, warnings: list[str] | None =
     if any("calibration layer is still preliminary" in warning for warning in warnings):
         cautions.append("calibration is preliminary")
 
+    disagreement_severity = model_disagreement.get("severity")
+    if disagreement_severity == "high":
+        cautions.append("model disagreement is high")
+    elif disagreement_severity == "watch":
+        cautions.append("model disagreement needs monitoring")
+
     status = "invalid" if invalid else ("degraded" if reasons else "ok")
     return {
         "status": status,
@@ -76,4 +83,6 @@ def _recommendation(status: str, reasons: list[str], cautions: list[str] | None 
         return "Treat this forecast as degraded; verify source compatibility before operational use."
     if any("minor live feature extrapolation" in caution for caution in cautions):
         return "Use forecast with monitoring; live feature is slightly outside the training envelope."
+    if any("model disagreement" in caution for caution in cautions):
+        return "Use forecast with caution; shadow models disagree with the operational champion."
     return "Treat this forecast as usable but lower confidence; review warnings and monitoring reports."

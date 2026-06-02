@@ -91,6 +91,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         *_format_intraday_summary(forecast.get("forecast_components", {})),
         *_format_shadow_summary(forecast.get("forecast_components", {})),
         *_format_ml_shadow_summary(forecast.get("forecast_components", {})),
+        *_format_model_disagreement(forecast.get("forecast_components", {})),
         "",
         "<b>Данные</b>",
         *_format_freshness(refresh),
@@ -272,6 +273,44 @@ def _format_ml_shadow_summary(components: dict) -> list[str]:
     return lines
 
 
+def _format_model_disagreement(components: dict) -> list[str]:
+    audit = (components or {}).get("model_disagreement") or {}
+    if audit.get("status") != "evaluated":
+        return []
+    summary = audit.get("summary") or {}
+    variants = audit.get("variants") or {}
+    severity = audit.get("severity", "none")
+    if severity == "none" and len(variants) < 3:
+        return []
+    severity_label = {
+        "none": "расхождение небольшое",
+        "watch": "нужно наблюдать",
+        "high": "сильное расхождение",
+    }.get(severity, escape(str(severity)))
+    lines = [
+        "",
+        "<b>Расхождение моделей</b>",
+        f"Статус: <b>{severity_label}</b>",
+        f"Разброс ожидаемого Tmax: {float(summary.get('expected_tmax_spread_c', 0.0)):.1f} °C",
+        f"Разброс P(Tmax ≥ 25 °C): {float(summary.get('ge_25_probability_spread', 0.0)):.1%}",
+        f"Разброс P(Tmax ≥ 30 °C): {float(summary.get('ge_30_probability_spread', 0.0)):.1%}",
+    ]
+    for name, label in (
+        ("production_champion", "Champion"),
+        ("shadow_seasonal_intraday", "Phase shadow"),
+        ("shadow_intraday_ml", "ML shadow"),
+    ):
+        item = variants.get(name)
+        if item:
+            thresholds = item.get("threshold_probabilities", {})
+            lines.append(
+                f"{label}: {float(item.get('expected_tmax_c', 0.0)):.1f} °C, "
+                f"корзина {int(item.get('most_likely_integer_c', 0))} °C, "
+                f"P≥30 {float(thresholds.get('ge_30', 0.0)):.1%}"
+            )
+    return lines
+
+
 def _signed_c(value: Any) -> str:
     return "нет данных" if value is None else f"{float(value):+.1f} °C"
 
@@ -392,6 +431,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
                 ]
             )
     lines.extend(_format_ml_shadow_summary(forecast_components))
+    lines.extend(_format_model_disagreement(forecast_components))
     if reasons:
         lines.extend(["", "<b>Почему отправлено</b>", ", ".join(_translate_reason(reason) for reason in reasons)])
     lines.extend(

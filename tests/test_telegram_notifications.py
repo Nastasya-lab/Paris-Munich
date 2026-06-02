@@ -324,6 +324,55 @@ def test_metar_event_message_includes_source_compatibility_audit():
     assert "отличается, но признан совместимым" in text
 
 
+def test_metar_event_message_includes_model_disagreement_audit():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.4,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {},
+            "probabilities_by_integer_c": {"22": 1.0},
+            "forecast_components": {
+                "intraday_update": {},
+                "model_disagreement": {
+                    "status": "evaluated",
+                    "severity": "high",
+                    "summary": {
+                        "expected_tmax_spread_c": 4.0,
+                        "ge_25_probability_spread": 0.4,
+                        "ge_30_probability_spread": 0.2,
+                    },
+                    "variants": {
+                        "production_champion": {
+                            "expected_tmax_c": 22.0,
+                            "most_likely_integer_c": 22,
+                            "threshold_probabilities": {"ge_30": 0.0},
+                        },
+                        "shadow_seasonal_intraday": {
+                            "expected_tmax_c": 23.0,
+                            "most_likely_integer_c": 23,
+                            "threshold_probabilities": {"ge_30": 0.0},
+                        },
+                        "shadow_intraday_ml": {
+                            "expected_tmax_c": 26.0,
+                            "most_likely_integer_c": 26,
+                            "threshold_probabilities": {"ge_30": 0.2},
+                        },
+                    },
+                },
+            },
+        },
+        {"previous": None, "current": {}, "deltas": {}},
+    )
+
+    assert "Расхождение моделей" in text
+    assert "сильное расхождение" in text
+    assert "Champion: 22.0" in text
+    assert "ML shadow: 26.0" in text
+
+
 def test_outcome_and_healthcheck_messages_are_russian():
     outcome = telegram.format_outcome_update_message(
         {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}

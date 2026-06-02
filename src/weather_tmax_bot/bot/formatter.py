@@ -119,6 +119,17 @@ def format_prediction(
             )
         elif ml_details.get("reason"):
             lines.append(f"- reason: {ml_details.get('reason')}")
+    disagreement = (forecast_components or {}).get("model_disagreement") or {}
+    if disagreement.get("status") == "evaluated":
+        summary = disagreement.get("summary") or {}
+        lines += [
+            "",
+            "Model disagreement:",
+            f"- severity: {disagreement.get('severity')}",
+            f"- expected Tmax spread: {float(summary.get('expected_tmax_spread_c', 0.0)):.1f}C",
+            f"- P(Tmax >= 25C) spread: {100 * float(summary.get('ge_25_probability_spread', 0.0)):.1f}%",
+            f"- P(Tmax >= 30C) spread: {100 * float(summary.get('ge_30_probability_spread', 0.0)):.1f}%",
+        ]
     if data_lineage:
         lines.append("")
         lines.append("Data used:")

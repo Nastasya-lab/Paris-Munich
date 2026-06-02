@@ -299,6 +299,8 @@ def _operational_metadata(record: dict) -> dict:
     quality = metadata.get("forecast_quality", {}) or {}
     acceptance = metadata.get("forecast_acceptance", {}) or {}
     compatibility = metadata.get("source_compatibility", {}) or {}
+    disagreement = metadata.get("model_disagreement", {}) or (metadata.get("forecast_components", {}) or {}).get("model_disagreement", {}) or {}
+    disagreement_summary = disagreement.get("summary", {}) or {}
     metar_source = metadata.get("latest_metar_source_id")
     taf_source = metadata.get("latest_taf_source_id")
     nwp_source = metadata.get("latest_nwp_source_id")
@@ -321,6 +323,14 @@ def _operational_metadata(record: dict) -> dict:
         "forecast_quality_status": quality.get("status"),
         "forecast_quality_reasons": ", ".join(quality.get("reasons", [])) if isinstance(quality.get("reasons"), list) else None,
         "forecast_quality_cautions": ", ".join(quality.get("cautions", [])) if isinstance(quality.get("cautions"), list) else None,
+        "model_disagreement_status": disagreement.get("status"),
+        "model_disagreement_severity": disagreement.get("severity"),
+        "model_disagreement_reasons": ", ".join(disagreement.get("reasons", []))
+        if isinstance(disagreement.get("reasons"), list)
+        else None,
+        "model_disagreement_expected_spread_c": disagreement_summary.get("expected_tmax_spread_c"),
+        "model_disagreement_ge_25_spread": disagreement_summary.get("ge_25_probability_spread"),
+        "model_disagreement_ge_30_spread": disagreement_summary.get("ge_30_probability_spread"),
         "forecast_accepted": acceptance.get("accepted"),
         "forecast_acceptance_blocking_reasons": ", ".join(acceptance.get("blocking_reasons", []))
         if isinstance(acceptance.get("blocking_reasons"), list)

@@ -28,6 +28,16 @@ def test_update_forecast_outcomes(tmp_path):
                 "taf": {"status": "exact_match"},
                 "nwp": {"status": "known_compatible"},
             },
+            "model_disagreement": {
+                "status": "evaluated",
+                "severity": "high",
+                "reasons": ["expected_tmax_spread_high"],
+                "summary": {
+                    "expected_tmax_spread_c": 4.0,
+                    "ge_25_probability_spread": 0.3,
+                    "ge_30_probability_spread": 0.2,
+                },
+            },
             "nwp_missing": True,
             "forecast_acceptance": {
                 "accepted": False,
@@ -74,6 +84,8 @@ def test_update_forecast_outcomes(tmp_path):
     assert out.iloc[0]["metar_source_mismatch"] == True
     assert out.iloc[0]["nwp_source_mismatch"] == True
     assert out.iloc[0]["nwp_source_compatibility_status"] == "known_compatible"
+    assert out.iloc[0]["model_disagreement_severity"] == "high"
+    assert out.iloc[0]["model_disagreement_expected_spread_c"] == 4.0
     assert out.iloc[0]["nwp_missing"] == True
     assert out.iloc[0]["forecast_accepted"] == False
     assert out.iloc[0]["forecast_acceptance_blocking_reasons"] == "quality_status_ok"

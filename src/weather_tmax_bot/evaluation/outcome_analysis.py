@@ -110,6 +110,10 @@ def format_outcome_analysis_markdown(analysis: dict) -> str:
     lines.extend(_table_lines(analysis.get("by_quality", [])))
     lines.extend(["", "## By forecast acceptance", ""])
     lines.extend(_table_lines(analysis.get("by_acceptance", [])))
+    lines.extend(["", "## By model disagreement", ""])
+    lines.extend(_table_lines(analysis.get("by_model_disagreement", [])))
+    lines.extend(["", "## By model disagreement status", ""])
+    lines.extend(_table_lines(analysis.get("by_model_disagreement_status", [])))
     lines.extend(["", "## By source mismatch", ""])
     lines.extend(_table_lines(analysis.get("by_source_mismatch", [])))
     lines.extend(["", "## By METAR source compatibility", ""])
@@ -133,6 +137,10 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         df["forecast_accepted"] = "unknown"
     else:
         df["forecast_accepted"] = df["forecast_accepted"].map(_acceptance_label)
+    if "model_disagreement_severity" not in df.columns:
+        df["model_disagreement_severity"] = "unknown"
+    if "model_disagreement_status" not in df.columns:
+        df["model_disagreement_status"] = "unknown"
     if "metar_source_mismatch" not in df.columns:
         df["metar_source_mismatch"] = False
     if "taf_source_mismatch" not in df.columns:
@@ -168,6 +176,8 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         ),
         "by_quality": _group_summary(df, ["forecast_quality_status"]),
         "by_acceptance": _group_summary(df, ["forecast_accepted"]),
+        "by_model_disagreement": _group_summary(df, ["model_disagreement_severity"]),
+        "by_model_disagreement_status": _group_summary(df, ["model_disagreement_status"]),
         "by_source_mismatch": _group_summary(df, ["any_source_mismatch"]),
         "by_metar_compatibility": _group_summary(df, ["metar_source_compatibility_status"]),
         "by_taf_compatibility": _group_summary(df, ["taf_source_compatibility_status"]),

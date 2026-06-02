@@ -33,6 +33,8 @@ def test_outcome_analysis_ready_with_scored_rows(tmp_path):
             "brier_ge_30": [0.3, 0.4],
             "forecast_quality_status": ["ok", "degraded"],
             "forecast_accepted": [True, False],
+            "model_disagreement_status": ["evaluated", "evaluated"],
+            "model_disagreement_severity": ["none", "high"],
             "metar_source_mismatch": [False, True],
             "taf_source_mismatch": [False, False],
             "nwp_source_mismatch": [False, True],
@@ -76,6 +78,7 @@ def test_outcome_analysis_ready_with_scored_rows(tmp_path):
     assert analysis["champion_vs_shadow"]["shadow_mae_win_rate"] == 1.0
     assert {row["forecast_quality_status"] for row in analysis["by_quality"]} == {"ok", "degraded"}
     assert {row["forecast_accepted"] for row in analysis["by_acceptance"]} == {"accepted", "rejected"}
+    assert {row["model_disagreement_severity"] for row in analysis["by_model_disagreement"]} == {"none", "high"}
     assert {row["metar_source_compatibility_status"] for row in analysis["by_metar_compatibility"]} == {
         "exact_match",
         "known_compatible",

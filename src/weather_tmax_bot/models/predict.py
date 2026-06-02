@@ -8,6 +8,7 @@ import pandas as pd
 
 from weather_tmax_bot.features.build_features import build_feature_row
 from weather_tmax_bot.models.baselines import ClimatologyBaseline
+from weather_tmax_bot.models.disagreement import assess_model_disagreement
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
 from weather_tmax_bot.models.intraday_update import apply_intraday_update
 from weather_tmax_bot.models.model_registry import load_model, resolve_active_artifacts
@@ -112,6 +113,8 @@ def predict_best_available(
                     **ml_shadow_details,
                 },
             }
+        model_disagreement = assess_model_disagreement(feature_row["forecast_variants"])
+        feature_row["model_disagreement"] = model_disagreement
         feature_row["intraday_update"] = intraday.details
         feature_row["shadow_intraday_update"] = shadow_intraday.details
         feature_row["forecast_components"] = {
@@ -145,6 +148,7 @@ def predict_best_available(
                 "final_model": None if ml_shadow_dist is None else ml_shadow_dist.to_payload(),
                 "comparison_to_champion": None if ml_shadow_dist is None else _distribution_comparison(ml_shadow_dist, dist),
             },
+            "model_disagreement": model_disagreement,
         }
         if intraday.details.get("active"):
             warnings.append("Intraday update applied: base prior blended with current METAR/TAF/NWP remaining-day signal.")

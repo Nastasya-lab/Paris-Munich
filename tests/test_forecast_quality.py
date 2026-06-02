@@ -124,6 +124,19 @@ def test_forecast_quality_treats_severe_extrapolation_as_degraded():
     assert "live features outside training range" in quality["reasons"]
 
 
+def test_forecast_quality_treats_model_disagreement_as_caution_only():
+    quality = assess_forecast_quality(
+        {
+            "freshness": {"metar": {"state": "fresh"}},
+            "model_disagreement": {"severity": "high"},
+        },
+        [],
+    )
+
+    assert quality["status"] == "ok"
+    assert "model disagreement is high" in quality["cautions"]
+
+
 def test_forecast_quality_allows_small_cron_jitter():
     quality = assess_forecast_quality(
         {
