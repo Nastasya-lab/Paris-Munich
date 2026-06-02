@@ -27,7 +27,7 @@ def evaluate_shadow_promotion_gate(
     manual promotion review.
     """
     if variants.empty:
-        return _pending("forecast_variant_monitoring is empty")
+        return _pending("forecast_variant_monitoring is empty", shadow_variant=shadow_variant, shadow_version=shadow_version)
     required = {
         "forecast_id",
         "forecast_variant",
@@ -40,7 +40,7 @@ def evaluate_shadow_promotion_gate(
     }
     missing = sorted(required.difference(variants.columns))
     if missing:
-        return _pending(f"missing columns: {', '.join(missing)}")
+        return _pending(f"missing columns: {', '.join(missing)}", shadow_variant=shadow_variant, shadow_version=shadow_version)
 
     df = variants.copy()
     champion = df[df["forecast_variant"] == CHAMPION_VARIANT].copy()
@@ -50,7 +50,7 @@ def evaluate_shadow_promotion_gate(
         if not versioned.empty:
             shadow = versioned
     if champion.empty or shadow.empty:
-        return _pending("paired champion/shadow rows are not available")
+        return _pending("paired champion/shadow rows are not available", shadow_variant=shadow_variant, shadow_version=shadow_version)
 
     pairs = champion.merge(
         shadow,
@@ -58,7 +58,7 @@ def evaluate_shadow_promotion_gate(
         suffixes=("_champion", "_shadow"),
     )
     if pairs.empty:
-        return _pending("no paired champion/shadow forecasts")
+        return _pending("no paired champion/shadow forecasts", shadow_variant=shadow_variant, shadow_version=shadow_version)
 
     pairs["abs_error_champion"] = pairs["error_expected_c_champion"].abs()
     pairs["abs_error_shadow"] = pairs["error_expected_c_shadow"].abs()
@@ -184,12 +184,12 @@ def format_shadow_promotion_gate_markdown(gate: dict) -> str:
     return "\n".join(lines)
 
 
-def _pending(reason: str) -> dict:
+def _pending(reason: str, *, shadow_variant: str = SHADOW_VARIANT, shadow_version: str = PHASE_AWARE_SHADOW_VERSION) -> dict:
     return {
         "status": "pending",
         "reason": reason,
-        "shadow_variant": SHADOW_VARIANT,
-        "shadow_version": PHASE_AWARE_SHADOW_VERSION,
+        "shadow_variant": shadow_variant,
+        "shadow_version": shadow_version,
         "metrics": {},
         "checks": {},
         "recommendation": "collect_more_independent_outcomes",

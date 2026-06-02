@@ -29,6 +29,11 @@ def build_outcome_analysis(
         analysis["by_variant_scenario"] = _variant_context_analysis(variants, ["forecast_variant", "scenario_tracking"])
         analysis["by_variant_local_hour"] = _variant_local_hour_analysis(variants)
         analysis["shadow_promotion_gate"] = evaluate_shadow_promotion_gate(variants)
+        analysis["intraday_ml_promotion_gate"] = evaluate_shadow_promotion_gate(
+            variants,
+            shadow_variant="shadow_intraday_ml",
+            shadow_version="intraday_ml_core_challenger_v1",
+        )
     else:
         analysis["by_forecast_variant"] = []
         analysis["champion_vs_shadow"] = {}
@@ -36,6 +41,11 @@ def build_outcome_analysis(
         analysis["by_variant_scenario"] = []
         analysis["by_variant_local_hour"] = []
         analysis["shadow_promotion_gate"] = evaluate_shadow_promotion_gate(pd.DataFrame())
+        analysis["intraday_ml_promotion_gate"] = evaluate_shadow_promotion_gate(
+            pd.DataFrame(),
+            shadow_variant="shadow_intraday_ml",
+            shadow_version="intraday_ml_core_challenger_v1",
+        )
     if output_json_path is not None:
         output = Path(output_json_path)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +91,15 @@ def format_outcome_analysis_markdown(analysis: dict) -> str:
     )
     if gate.get("checks"):
         lines.extend(f"- `{key}`: `{value}`" for key, value in gate.get("checks", {}).items())
+    ml_gate = analysis.get("intraday_ml_promotion_gate", {}) or {}
+    lines.extend(["", "## Intraday ML promotion gate", ""])
+    lines.extend(
+        [
+            f"- `status`: `{ml_gate.get('status')}`",
+            f"- `shadow_version`: `{ml_gate.get('shadow_version')}`",
+            f"- `recommendation`: `{ml_gate.get('recommendation')}`",
+        ]
+    )
     lines.extend(["", "## By variant phase", ""])
     lines.extend(_table_lines(analysis.get("by_variant_phase", [])))
     lines.extend(["", "## By variant scenario", ""])
@@ -134,6 +153,11 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         "by_variant_scenario": [],
         "by_variant_local_hour": [],
         "shadow_promotion_gate": evaluate_shadow_promotion_gate(pd.DataFrame()),
+        "intraday_ml_promotion_gate": evaluate_shadow_promotion_gate(
+            pd.DataFrame(),
+            shadow_variant="shadow_intraday_ml",
+            shadow_version="intraday_ml_core_challenger_v1",
+        ),
         "by_quality": _group_summary(df, ["forecast_quality_status"]),
         "by_acceptance": _group_summary(df, ["forecast_accepted"]),
         "by_source_mismatch": _group_summary(df, ["any_source_mismatch"]),
@@ -171,6 +195,11 @@ def _empty_analysis(reason: str) -> dict:
         "by_variant_scenario": [],
         "by_variant_local_hour": [],
         "shadow_promotion_gate": evaluate_shadow_promotion_gate(pd.DataFrame()),
+        "intraday_ml_promotion_gate": evaluate_shadow_promotion_gate(
+            pd.DataFrame(),
+            shadow_variant="shadow_intraday_ml",
+            shadow_version="intraday_ml_core_challenger_v1",
+        ),
         "by_quality": [],
         "by_acceptance": [],
         "by_source_mismatch": [],

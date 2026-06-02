@@ -91,6 +91,28 @@ def format_prediction(
             )
         elif shadow_intraday.get("reason"):
             lines.append(f"- intraday reason: {shadow_intraday.get('reason')}")
+    ml_shadow = (forecast_components or {}).get("ml_shadow_mode") or {}
+    ml_details = ml_shadow.get("details") or {}
+    ml_final = ml_shadow.get("final_model") or {}
+    if ml_shadow:
+        lines += [
+            "",
+            "ML shadow scenario: remaining-upside challenger",
+            "- shadow only: preliminary uncalibrated and does not affect the operational forecast",
+            f"- active: {ml_details.get('active')}",
+        ]
+        if ml_details.get("active"):
+            lines.extend(
+                [
+                    f"- expected Tmax: {_fmt_component_expected(ml_final)}",
+                    f"- P(peak already passed): {100 * float(ml_details.get('probability_peak_already_passed', 0.0)):.1f}%",
+                    f"- P(upside >= +1C): {100 * float(ml_details.get('probability_upside_ge_1c', 0.0)):.1f}%",
+                    f"- P(upside >= +2C): {100 * float(ml_details.get('probability_upside_ge_2c', 0.0)):.1f}%",
+                    f"- P(upside >= +3C): {100 * float(ml_details.get('probability_upside_ge_3c', 0.0)):.1f}%",
+                ]
+            )
+        elif ml_details.get("reason"):
+            lines.append(f"- reason: {ml_details.get('reason')}")
     if data_lineage:
         lines.append("")
         lines.append("Data used:")

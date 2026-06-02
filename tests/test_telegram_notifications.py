@@ -264,6 +264,41 @@ def test_metar_event_message_includes_shadow_distribution_without_deltas():
     assert "\u043f.\u043f." not in text.split("Shadow-\u0441\u0446\u0435\u043d\u0430\u0440\u0438\u0439", 1)[1]
 
 
+def test_metar_event_message_includes_intraday_ml_shadow_probabilities():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.4,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {},
+            "probabilities_by_integer_c": {"22": 1.0},
+            "forecast_components": {
+                "intraday_update": {},
+                "ml_shadow_mode": {
+                    "details": {
+                        "active": True,
+                        "probability_peak_already_passed": 0.4,
+                        "probability_upside_ge_1c": 0.5,
+                        "probability_upside_ge_2c": 0.2,
+                        "probability_upside_ge_3c": 0.1,
+                    },
+                    "final_model": {
+                        "expected_tmax_c": 22.8,
+                        "probabilities_by_integer_c": {"22": 0.4, "23": 0.4, "24": 0.2},
+                    },
+                },
+            },
+        },
+        {"previous": None, "current": {}, "deltas": {}},
+    )
+
+    assert "ML shadow: remaining upside" in text
+    assert "\u0412\u0435\u0440\u043e\u044f\u0442\u043d\u043e\u0441\u0442\u044c, \u0447\u0442\u043e \u043f\u0438\u043a \u0443\u0436\u0435 \u0431\u044b\u043b: 40.0%" in text
+    assert "\u0428\u0430\u043d\u0441 \u0440\u043e\u0441\u0442\u0430 \u0435\u0449\u0435 \u043c\u0438\u043d\u0438\u043c\u0443\u043c \u043d\u0430 +3 \u00b0C: 10.0%" in text
+
+
 def test_outcome_and_healthcheck_messages_are_russian():
     outcome = telegram.format_outcome_update_message(
         {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}

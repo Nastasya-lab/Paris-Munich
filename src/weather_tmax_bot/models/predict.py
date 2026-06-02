@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import joblib
 import pandas as pd
 
 from weather_tmax_bot.features.build_features import build_feature_row
@@ -73,6 +74,7 @@ def predict_best_available(
             issue_time_utc,
             blend_weight_profile="seasonal_shadow",
         )
+        ml_shadow_dist, ml_shadow_details = _predict_intraday_ml_shadow(feature_row)
         dist = intraday.distribution
         feature_row["forecast_variants"] = {
             "production_champion": {
@@ -96,6 +98,15 @@ def predict_best_available(
                 },
             },
         }
+        if ml_shadow_dist is not None:
+            feature_row["forecast_variants"]["shadow_intraday_ml"] = {
+                "description": "Preliminary uncalibrated ordinal remaining-upside ML shadow challenger.",
+                "distribution": ml_shadow_dist.to_payload(),
+                "metadata": {
+                    "variant_version": "intraday_ml_core_challenger_v1",
+                    **ml_shadow_details,
+                },
+            }
         feature_row["intraday_update"] = intraday.details
         feature_row["shadow_intraday_update"] = shadow_intraday.details
         feature_row["forecast_components"] = {
@@ -117,6 +128,13 @@ def predict_best_available(
                 },
                 "final_model": shadow_intraday.details.get("final_model"),
                 "comparison_to_champion": _distribution_comparison(shadow_intraday.distribution, dist),
+            },
+            "ml_shadow_mode": {
+                "name": "intraday_ml_core_challenger_v1",
+                "status": "shadow_only_preliminary_uncalibrated_does_not_affect_operational_forecast",
+                "details": ml_shadow_details,
+                "final_model": None if ml_shadow_dist is None else ml_shadow_dist.to_payload(),
+                "comparison_to_champion": None if ml_shadow_dist is None else _distribution_comparison(ml_shadow_dist, dist),
             },
         }
         if intraday.details.get("active"):
@@ -143,6 +161,17 @@ def predict_best_available(
     dist = predict_with_climatology(target_date, daily_target_path=daily_target_path)
     warnings.append("Quantile model unavailable; climatology MVP distribution used.")
     return dist, {"model_version": "climatology_mvp", "feature_snapshot": {}, "warnings": warnings}
+
+
+def _predict_intraday_ml_shadow(feature_row: dict, model_path: str | Path = "data/models/intraday_ml_core_challenger_v1.joblib"):
+    path = Path(model_path)
+    if not path.exists():
+        return None, {"active": False, "reason": "intraday_ml_artifact_unavailable"}
+    try:
+        model = joblib.load(path)
+        return model.predict_distribution(feature_row)
+    except (ValueError, TypeError) as exc:
+        return None, {"active": False, "reason": f"intraday_ml_prediction_unavailable: {exc}"}
 
 
 def _synthetic_targets() -> pd.DataFrame:

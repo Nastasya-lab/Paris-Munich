@@ -44,6 +44,7 @@ def test_run_prediction_logs_acceptance_metadata(tmp_path, monkeypatch):
     assert "forecast_variants" in record["raw_input_metadata"]
     assert "production_champion" in record["raw_input_metadata"]["forecast_variants"]
     assert "shadow_seasonal_intraday" in record["raw_input_metadata"]["forecast_variants"]
+    assert "ml_shadow_mode" in record["raw_input_metadata"]["forecast_components"]
     assert record["raw_input_metadata"]["forecast_acceptance"]["accepted"] == result["forecast_acceptance"]["accepted"]
 
 

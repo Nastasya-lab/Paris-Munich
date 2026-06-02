@@ -1,0 +1,139 @@
+{
+  "model_name": "ordinal_intraday_remaining_upside",
+  "model_version": "intraday_ml_core_challenger_v1",
+  "mode": "shadow_only",
+  "training_period": [
+    "2020-01-01",
+    "2025-12-30"
+  ],
+  "training_rows": 15299,
+  "feature_set_version": "intraday_ml_core.v1",
+  "feature_columns": [
+    "issue_hour_utc",
+    "issue_hour_continuous_utc",
+    "lead_to_local_day_end_hours",
+    "month",
+    "doy_sin",
+    "doy_cos",
+    "last_metar_temp_c",
+    "last_metar_dewpoint_c",
+    "last_metar_qnh_hpa",
+    "temp_trend_1h",
+    "temp_trend_3h",
+    "temp_trend_6h",
+    "observed_max_so_far_from_metar",
+    "observed_min_so_far_from_metar",
+    "pressure_trend_3h",
+    "dewpoint_depression",
+    "wind_u",
+    "wind_v",
+    "is_cavok",
+    "has_precip_recent",
+    "has_fog_recent",
+    "has_thunder_recent",
+    "metar_missing_last_1h",
+    "metar_missing_last_3h",
+    "taf_missing",
+    "taf_has_rain",
+    "taf_has_shower",
+    "taf_has_thunder",
+    "taf_has_fog",
+    "taf_has_snow",
+    "taf_wind_shift_flag",
+    "taf_prob30_bad_weather",
+    "taf_prob40_bad_weather",
+    "taf_age_hours_at_issue",
+    "nwp_missing",
+    "model_tmax_c",
+    "model_temp_at_08_local",
+    "model_temp_at_11_local",
+    "model_temp_at_14_local",
+    "model_temp_at_17_local",
+    "model_cloud_cover_mean",
+    "model_precip_sum",
+    "model_shortwave_radiation_sum",
+    "model_wind_speed_max",
+    "model_gust_max",
+    "model_pressure_mean",
+    "model_dewpoint_mean",
+    "model_relative_humidity_mean"
+  ],
+  "data_snapshot_hash": "3fb37617f752a11ea7fe82650d0692ecdb165e64747054b273db48d3ffed1ef0",
+  "created_at_utc": "2026-06-02T06:35:18.655543+00:00",
+  "rolling_backtest": [
+    {
+      "model_variant": "empirical_hourly_upside_baseline",
+      "rows": 1063,
+      "distinct_target_days": 152,
+      "mae_expected": 2.2322824965,
+      "rmse_expected": 3.2173692336,
+      "bias_expected": 0.558383271,
+      "mean_nll": 3.6569637321,
+      "mean_crps": 0.0840447456,
+      "brier_peak_already_passed": 0.1030689556,
+      "brier_upside_ge_1c": 0.108103254,
+      "brier_upside_ge_2c": 0.119917038,
+      "brier_upside_ge_3c": 0.1374118668,
+      "coverage_80": 0.6434619003,
+      "mean_false_upside_probability": 0.43992261
+    },
+    {
+      "model_variant": "intraday_ml_core_challenger_v1",
+      "rows": 1063,
+      "distinct_target_days": 152,
+      "mae_expected": 1.3664151369,
+      "rmse_expected": 2.1155668255,
+      "bias_expected": -0.4027892968,
+      "mean_nll": 5.3040056927,
+      "mean_crps": 0.0526828705,
+      "brier_peak_already_passed": 0.1019370575,
+      "brier_upside_ge_1c": 0.0899851557,
+      "brier_upside_ge_2c": 0.0831543603,
+      "brier_upside_ge_3c": 0.084979393,
+      "coverage_80": 0.5305738476,
+      "mean_false_upside_probability": 0.2927323452
+    }
+  ],
+  "folds": [
+    {
+      "fold_start": "2025-08-01",
+      "fold_end": "2025-08-31",
+      "status": "evaluated",
+      "train_rows": 14236,
+      "test_rows": 216
+    },
+    {
+      "fold_start": "2025-09-01",
+      "fold_end": "2025-09-30",
+      "status": "evaluated",
+      "train_rows": 14452,
+      "test_rows": 210
+    },
+    {
+      "fold_start": "2025-10-01",
+      "fold_end": "2025-10-31",
+      "status": "evaluated",
+      "train_rows": 14662,
+      "test_rows": 217
+    },
+    {
+      "fold_start": "2025-11-01",
+      "fold_end": "2025-11-30",
+      "status": "evaluated",
+      "train_rows": 14879,
+      "test_rows": 210
+    },
+    {
+      "fold_start": "2025-12-01",
+      "fold_end": "2025-12-31",
+      "status": "evaluated",
+      "train_rows": 15089,
+      "test_rows": 210
+    }
+  ],
+  "limitations": [
+    "Historical TAF archive is empty, so TAF values degrade to missing flags during training.",
+    "ICON-D2 features are optional because honest historical NWP overlap starts in late May 2025.",
+    "This artifact is shadow-only and is not registered as the active production model."
+  ]
+}

@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+
+from weather_tmax_bot.data.storage import write_parquet
+from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, mae, nll_integer_bin, rmse
+from weather_tmax_bot.models.distribution import TmaxDistribution
+from weather_tmax_bot.models.intraday_ml import IntradayMLUpsideModel, prepare_intraday_ml_dataset
+from weather_tmax_bot.utils.hashing import stable_hash
+
+VERSION = "intraday_ml_core_challenger_v1"
+MODEL_PATH = Path("data/models") / f"{VERSION}.joblib"
+METADATA_PATH = Path("data/models") / f"{VERSION}.metadata.json"
+
+
+def main() -> None:
+    source = Path("data/processed/intraday_ml_dataset.parquet")
+    if source.exists():
+        dataset = pd.read_parquet(source)
+    else:
+        dataset = prepare_intraday_ml_dataset(pd.read_parquet("data/processed/training_dataset.parquet"))
+    dataset["target_date_local"] = pd.to_datetime(dataset["target_date_local"], errors="coerce").dt.date
+    usable = dataset[dataset["target_date_local"] <= pd.to_datetime("2025-12-30").date()].copy()
+    scored, fold_inventory = _rolling_backtest(usable)
+    summary = _group_summary(scored, ["model_variant"])
+    by_hour = _group_summary(scored, ["model_variant", "issue_hour_utc"])
+    by_fold = _group_summary(scored, ["model_variant", "fold_start"])
+    model = IntradayMLUpsideModel().fit(usable)
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, MODEL_PATH)
+    metadata = {
+        "model_name": "ordinal_intraday_remaining_upside",
+        "model_version": VERSION,
+        "mode": "shadow_only",
+        "training_period": [str(usable["target_date_local"].min()), str(usable["target_date_local"].max())],
+        "training_rows": len(usable),
+        "feature_set_version": "intraday_ml_core.v1",
+        "feature_columns": model.feature_columns,
+        "data_snapshot_hash": stable_hash({"rows": len(usable), "target_sum": float(usable["tmax_c"].sum())}),
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "rolling_backtest": json.loads(summary.to_json(orient="records")),
+        "folds": fold_inventory,
+        "limitations": [
+            "Historical TAF archive is empty, so TAF values degrade to missing flags during training.",
+            "ICON-D2 features are optional because honest historical NWP overlap starts in late May 2025.",
+            "This artifact is shadow-only and is not registered as the active production model.",
+        ],
+    }
+    METADATA_PATH.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+    write_parquet(scored, "data/reports/intraday_ml_rolling_rows.parquet")
+    write_parquet(summary, "data/reports/intraday_ml_rolling_summary.parquet")
+    write_parquet(by_hour, "data/reports/intraday_ml_rolling_by_hour.parquet")
+    write_parquet(by_fold, "data/reports/intraday_ml_rolling_by_fold.parquet")
+    Path("data/reports/intraday_ml_training_report.json").write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+    Path("docs/intraday_ml_challenger.md").write_text(_doc(metadata, by_hour, by_fold), encoding="utf-8")
+    print(json.dumps(metadata, indent=2, default=str))
+
+
+def _rolling_backtest(dataset: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
+    rows = []
+    folds = []
+    for fold_start in pd.date_range("2025-08-01", "2025-12-01", freq="MS").date:
+        fold_end = (pd.Timestamp(fold_start) + pd.offsets.MonthEnd(1)).date()
+        train = dataset[dataset["target_date_local"] < fold_start].copy()
+        test = dataset[(dataset["target_date_local"] >= fold_start) & (dataset["target_date_local"] <= fold_end)].copy()
+        if len(train) < 300 or test.empty:
+            folds.append({"fold_start": fold_start.isoformat(), "fold_end": fold_end.isoformat(), "status": "skipped", "train_rows": len(train), "test_rows": len(test)})
+            continue
+        model = IntradayMLUpsideModel().fit(train)
+        for _, row in test.iterrows():
+            dist, details = model.predict_distribution(row.to_dict())
+            baseline_dist, baseline_details = _empirical_upside_distribution(train, row)
+            rows.append(_score("intraday_ml_core_challenger_v1", row, dist, details, fold_start))
+            rows.append(_score("empirical_hourly_upside_baseline", row, baseline_dist, baseline_details, fold_start))
+        folds.append({"fold_start": fold_start.isoformat(), "fold_end": fold_end.isoformat(), "status": "evaluated", "train_rows": len(train), "test_rows": len(test)})
+    if not rows:
+        raise ValueError("intraday ML rolling backtest found no evaluable folds")
+    return pd.DataFrame(rows), folds
+
+
+def _score(model_variant: str, row: pd.Series, dist: TmaxDistribution, details: dict, fold_start) -> dict:
+    actual = float(row["tmax_c"])
+    return {
+        "model_variant": model_variant,
+        "fold_start": fold_start.isoformat(),
+        "target_date_local": row["target_date_local"].isoformat(),
+        "issue_time_utc": pd.Timestamp(row["issue_time_utc"]).isoformat(),
+        "issue_hour_utc": int(row["issue_hour_utc"]),
+        "actual_tmax_c": actual,
+        "expected_tmax_c": dist.expected_tmax_c,
+        "median_tmax_c": dist.median_tmax_c,
+        "nll": nll_integer_bin(dist, actual),
+        "crps": crps_discrete(dist, actual),
+        "brier_peak_already_passed": brier(details["probability_peak_already_passed"], bool(row["peak_already_passed"])),
+        "brier_upside_ge_1c": brier(details["probability_upside_ge_1c"], bool(row["upside_ge_1c"])),
+        "brier_upside_ge_2c": brier(details["probability_upside_ge_2c"], bool(row["upside_ge_2c"])),
+        "brier_upside_ge_3c": brier(details["probability_upside_ge_3c"], bool(row["upside_ge_3c"])),
+        "covered_80": _covered(dist, actual, 0.80),
+        "probability_above_actual_integer_bin": float(dist.probabilities[dist.bins_c > round(actual)].sum()),
+    }
+
+
+def _empirical_upside_distribution(train: pd.DataFrame, row: pd.Series) -> tuple[TmaxDistribution, dict]:
+    candidates = train[train["issue_hour_utc"] == row["issue_hour_utc"]]
+    if len(candidates) < 100:
+        candidates = train
+    observed_max = float(row["observed_max_so_far_from_metar"])
+    upside = pd.to_numeric(candidates["remaining_upside_c"], errors="coerce").dropna().to_numpy(dtype=float)
+    rounded = np.rint(observed_max + upside).astype(int)
+    bins = np.arange(rounded.min(), rounded.max() + 1)
+    probabilities = np.array([(rounded == bin_c).sum() for bin_c in bins], dtype=float)
+    dist = TmaxDistribution(bins, probabilities)
+    return dist, {
+        "probability_peak_already_passed": float((upside < 0.5).mean()),
+        "probability_upside_ge_1c": float((upside >= 1).mean()),
+        "probability_upside_ge_2c": float((upside >= 2).mean()),
+        "probability_upside_ge_3c": float((upside >= 3).mean()),
+    }
+
+
+def _summary(scored: pd.DataFrame) -> dict:
+    return {
+        "rows": len(scored),
+        "distinct_target_days": int(scored["target_date_local"].nunique()),
+        "mae_expected": mae(scored["actual_tmax_c"], scored["expected_tmax_c"]),
+        "rmse_expected": rmse(scored["actual_tmax_c"], scored["expected_tmax_c"]),
+        "bias_expected": float((scored["expected_tmax_c"] - scored["actual_tmax_c"]).mean()),
+        "mean_nll": float(scored["nll"].mean()),
+        "mean_crps": float(scored["crps"].mean()),
+        "brier_peak_already_passed": float(scored["brier_peak_already_passed"].mean()),
+        "brier_upside_ge_1c": float(scored["brier_upside_ge_1c"].mean()),
+        "brier_upside_ge_2c": float(scored["brier_upside_ge_2c"].mean()),
+        "brier_upside_ge_3c": float(scored["brier_upside_ge_3c"].mean()),
+        "coverage_80": float(scored["covered_80"].mean()),
+        "mean_false_upside_probability": float(scored["probability_above_actual_integer_bin"].mean()),
+    }
+
+
+def _group_summary(scored: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    rows = []
+    for keys, group in scored.groupby(columns, dropna=False):
+        keys = keys if isinstance(keys, tuple) else (keys,)
+        rows.append({**dict(zip(columns, keys)), **_summary(group)})
+    return pd.DataFrame(rows)
+
+
+def _covered(dist, actual: float, mass: float) -> bool:
+    low, high = dist.interval(mass)
+    return bool(low <= actual <= high)
+
+
+def _doc(metadata: dict, by_hour: pd.DataFrame, by_fold: pd.DataFrame) -> str:
+    summary = metadata["rolling_backtest"]
+    lines = [
+        "# Intraday ML challenger",
+        "",
+        "Shadow-only ordinal remaining-upside model. It predicts a monotonic survival curve for future Tmax increases and converts that curve into integer-bin probabilities.",
+        "",
+        f"- model version: `{metadata['model_version']}`",
+        f"- training rows: `{metadata['training_rows']}`",
+        f"- training period: `{metadata['training_period'][0]}` to `{metadata['training_period'][1]}`",
+        "## Rolling comparison",
+        "",
+        _table(pd.DataFrame(summary)),
+        "",
+        "## By issue hour",
+        "",
+        _table(by_hour),
+        "",
+        "## By fold",
+        "",
+        _table(by_fold),
+        "",
+        "## Limitations",
+        "",
+    ]
+    lines.extend(f"- {item}" for item in metadata["limitations"])
+    lines.extend(["", "## Decision", "", "Keep this model in shadow mode until historical comparison and forward outcomes are reviewed.", ""])
+    return "\n".join(lines)
+
+
+def _table(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "No rows."
+    columns = list(df.columns)
+    lines = ["| " + " | ".join(columns) + " |", "| " + " | ".join(["---"] * len(columns)) + " |"]
+    for _, row in df.iterrows():
+        lines.append("| " + " | ".join(str(row[column]) for column in columns) + " |")
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    main()

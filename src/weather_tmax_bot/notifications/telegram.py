@@ -88,6 +88,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
         *_format_intraday_summary(forecast.get("forecast_components", {})),
         *_format_shadow_summary(forecast.get("forecast_components", {})),
+        *_format_ml_shadow_summary(forecast.get("forecast_components", {})),
         "",
         "<b>Данные</b>",
         *_format_freshness(refresh),
@@ -234,6 +235,33 @@ def _format_compact_bins(probabilities: dict, limit: int = 4) -> str:
     return ", ".join(f"{bin_c:+d} °C {probability:.1%}" for bin_c, probability in rows)
 
 
+def _format_ml_shadow_summary(components: dict) -> list[str]:
+    shadow = (components or {}).get("ml_shadow_mode") or {}
+    if not shadow:
+        return []
+    details = shadow.get("details") or {}
+    final_model = shadow.get("final_model") or {}
+    lines = [
+        "",
+        "<b>ML shadow: remaining upside</b>",
+        "Предварительная ML-модель. Не влияет на основной прогноз и пока не откалибрована.",
+    ]
+    if not details.get("active"):
+        lines.append(f"Статус: неактивна ({escape(str(details.get('reason', 'нет данных')))})")
+        return lines
+    lines.extend(
+        [
+            f"Ожидаемый максимум: {float(final_model.get('expected_tmax_c', 0.0)):.1f} °C",
+            f"Вероятность, что пик уже был: {float(details.get('probability_peak_already_passed', 0.0)):.1%}",
+            f"Шанс роста еще минимум на +1 °C: {float(details.get('probability_upside_ge_1c', 0.0)):.1%}",
+            f"Шанс роста еще минимум на +2 °C: {float(details.get('probability_upside_ge_2c', 0.0)):.1%}",
+            f"Шанс роста еще минимум на +3 °C: {float(details.get('probability_upside_ge_3c', 0.0)):.1%}",
+            f"Распределение: {_format_compact_bins(final_model.get('probabilities_by_integer_c', {}), limit=6)}",
+        ]
+    )
+    return lines
+
+
 def _signed_c(value: Any) -> str:
     return "нет данных" if value is None else f"{float(value):+.1f} °C"
 
@@ -331,6 +359,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
                     f"После поправки cap_blend × {float(shadow_intraday.get('survival_adjustment_strength', 0.0)):.2f}: <b>{float(shadow_intraday.get('survival_adjusted_upside_probability', 0.0)):.1%}</b>",
                 ]
             )
+    lines.extend(_format_ml_shadow_summary(forecast_components))
     if reasons:
         lines.extend(["", "<b>Почему отправлено</b>", ", ".join(_translate_reason(reason) for reason in reasons)])
     lines.extend(

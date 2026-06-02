@@ -13,6 +13,8 @@ Current candidate:
 
 - Forecast variant: `shadow_seasonal_intraday`
 - Variant version: `phase_aware_intraday_challenger_v3`
+- Additional ML candidate: `shadow_intraday_ml`
+- Additional ML version: `intraday_ml_core_challenger_v1`
 - Production champion: `production_champion`
 
 Older shadow rows remain in the logs, but the gate filters to the current
@@ -64,3 +66,7 @@ Generated reports:
 - `docs/shadow_promotion_gate.md`
 - The gate is also embedded in `docs/outcome_analysis.md` and monitoring
   summaries.
+
+The intraday ML candidate is evaluated with the same paired-gate logic, but it
+is intentionally treated as a separate challenger because it is currently
+preliminary and not fully calibrated.
