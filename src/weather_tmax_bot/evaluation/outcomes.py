@@ -301,19 +301,23 @@ def _operational_metadata(record: dict) -> dict:
     compatibility = metadata.get("source_compatibility", {}) or {}
     metar_source = metadata.get("latest_metar_source_id")
     taf_source = metadata.get("latest_taf_source_id")
+    nwp_source = metadata.get("latest_nwp_source_id")
     metar_compat = compatibility.get("metar", {})
     taf_compat = compatibility.get("taf", {})
+    nwp_compat = compatibility.get("nwp", {})
     return {
         "latest_metar_source_id": metar_source,
         "latest_taf_source_id": taf_source,
-        "latest_nwp_source_id": metadata.get("latest_nwp_source_id"),
+        "latest_nwp_source_id": nwp_source,
         "metar_missing": bool(metadata.get("metar_missing", False)),
         "taf_missing": bool(metadata.get("taf_missing", False)),
         "nwp_missing": bool(metadata.get("nwp_missing", False)),
-        "metar_source_mismatch": bool(metar_source and metar_source != "iem.metar.archive.EDDM"),
-        "taf_source_mismatch": bool(taf_source and taf_source != "iem.taf.archive.EDDM"),
+        "metar_source_mismatch": _is_source_mismatch(metar_compat),
+        "taf_source_mismatch": _is_source_mismatch(taf_compat),
+        "nwp_source_mismatch": _is_source_mismatch(nwp_compat),
         "metar_source_compatibility_status": metar_compat.get("status"),
         "taf_source_compatibility_status": taf_compat.get("status"),
+        "nwp_source_compatibility_status": nwp_compat.get("status"),
         "forecast_quality_status": quality.get("status"),
         "forecast_quality_reasons": ", ".join(quality.get("reasons", [])) if isinstance(quality.get("reasons"), list) else None,
         "forecast_quality_cautions": ", ".join(quality.get("cautions", [])) if isinstance(quality.get("cautions"), list) else None,
@@ -324,3 +328,7 @@ def _operational_metadata(record: dict) -> dict:
         "forecast_acceptance_cautions": ", ".join(acceptance.get("cautions", [])) if isinstance(acceptance.get("cautions"), list) else None,
         "max_feature_knowledge_time_utc": record.get("max_feature_knowledge_time_utc"),
     }
+
+
+def _is_source_mismatch(compatibility: dict) -> bool:
+    return compatibility.get("status") in {"known_compatible", "unknown_mismatch", "forbidden_mismatch"}

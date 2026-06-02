@@ -36,7 +36,7 @@ def test_forecast_quality_distinguishes_known_compatible_source_difference():
     quality = assess_forecast_quality(
         {
             "freshness": {"metar": {"state": "fresh"}},
-            "source_compatibility": {"metar": {"status": "known_runtime_compatible"}},
+            "source_compatibility": {"metar": {"status": "known_compatible"}},
         },
         [],
     )
@@ -50,7 +50,7 @@ def test_forecast_quality_marks_unknown_source_difference():
     quality = assess_forecast_quality(
         {
             "freshness": {"metar": {"state": "fresh"}},
-            "source_compatibility": {"metar": {"status": "unknown_runtime_source"}},
+            "source_compatibility": {"metar": {"status": "unknown_mismatch"}},
         },
         [],
     )
@@ -64,8 +64,8 @@ def test_forecast_quality_can_be_ok_with_only_known_compatible_source_caution():
         {
             "freshness": {"metar": {"state": "fresh"}, "taf": {"state": "fresh"}, "nwp": {"state": "fresh"}},
             "source_compatibility": {
-                "metar": {"status": "known_runtime_compatible"},
-                "taf": {"status": "known_runtime_compatible"},
+                "metar": {"status": "known_compatible"},
+                "taf": {"status": "known_compatible"},
             },
         },
         [],
@@ -73,6 +73,19 @@ def test_forecast_quality_can_be_ok_with_only_known_compatible_source_caution():
 
     assert quality["status"] == "ok"
     assert len(quality["cautions"]) == 1
+
+
+def test_forecast_quality_marks_forbidden_source_difference_invalid():
+    quality = assess_forecast_quality(
+        {
+            "freshness": {"metar": {"state": "fresh"}},
+            "source_compatibility": {"metar": {"status": "forbidden_mismatch", "blocking": True}},
+        },
+        [],
+    )
+
+    assert quality["status"] == "invalid"
+    assert "forbidden runtime source differs from training source" in quality["reasons"]
 
 
 def test_forecast_quality_preliminary_calibration_is_caution_only():

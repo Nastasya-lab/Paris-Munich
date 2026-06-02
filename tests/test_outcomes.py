@@ -22,6 +22,12 @@ def test_update_forecast_outcomes(tmp_path):
         "raw_input_metadata": {
             "latest_metar_source_id": "awc.metar.live.EDDM",
             "latest_taf_source_id": "iem.taf.archive.EDDM",
+            "latest_nwp_source_id": "open_meteo.live.icon_d2",
+            "source_compatibility": {
+                "metar": {"status": "known_compatible"},
+                "taf": {"status": "exact_match"},
+                "nwp": {"status": "known_compatible"},
+            },
             "nwp_missing": True,
             "forecast_acceptance": {
                 "accepted": False,
@@ -66,6 +72,8 @@ def test_update_forecast_outcomes(tmp_path):
     assert shadow["coverage_80"] == True
     assert out.iloc[0]["forecast_id"] == "f1"
     assert out.iloc[0]["metar_source_mismatch"] == True
+    assert out.iloc[0]["nwp_source_mismatch"] == True
+    assert out.iloc[0]["nwp_source_compatibility_status"] == "known_compatible"
     assert out.iloc[0]["nwp_missing"] == True
     assert out.iloc[0]["forecast_accepted"] == False
     assert out.iloc[0]["forecast_acceptance_blocking_reasons"] == "quality_status_ok"

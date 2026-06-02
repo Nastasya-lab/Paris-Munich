@@ -35,8 +35,10 @@ def test_outcome_analysis_ready_with_scored_rows(tmp_path):
             "forecast_accepted": [True, False],
             "metar_source_mismatch": [False, True],
             "taf_source_mismatch": [False, False],
-            "metar_source_compatibility_status": ["same_source", "known_runtime_compatible"],
-            "taf_source_compatibility_status": ["same_source", "same_source"],
+            "nwp_source_mismatch": [False, True],
+            "metar_source_compatibility_status": ["exact_match", "known_compatible"],
+            "taf_source_compatibility_status": ["exact_match", "exact_match"],
+            "nwp_source_compatibility_status": ["exact_match", "known_compatible"],
         }
     ).to_parquet(monitoring_path, index=False)
     pd.DataFrame(
@@ -75,8 +77,12 @@ def test_outcome_analysis_ready_with_scored_rows(tmp_path):
     assert {row["forecast_quality_status"] for row in analysis["by_quality"]} == {"ok", "degraded"}
     assert {row["forecast_accepted"] for row in analysis["by_acceptance"]} == {"accepted", "rejected"}
     assert {row["metar_source_compatibility_status"] for row in analysis["by_metar_compatibility"]} == {
-        "same_source",
-        "known_runtime_compatible",
+        "exact_match",
+        "known_compatible",
+    }
+    assert {row["nwp_source_compatibility_status"] for row in analysis["by_nwp_compatibility"]} == {
+        "exact_match",
+        "known_compatible",
     }
 
 

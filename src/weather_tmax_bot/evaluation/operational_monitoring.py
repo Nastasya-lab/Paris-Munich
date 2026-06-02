@@ -161,10 +161,14 @@ def summarize_by_model(monitoring: pd.DataFrame) -> pd.DataFrame:
 
 def summarize_source_mismatch(monitoring: pd.DataFrame) -> pd.DataFrame:
     df = monitoring.copy()
-    for col in ("metar_source_mismatch", "taf_source_mismatch"):
+    for col in ("metar_source_mismatch", "taf_source_mismatch", "nwp_source_mismatch"):
         if col not in df.columns:
             df[col] = False
-    df["any_source_mismatch"] = df["metar_source_mismatch"].fillna(False) | df["taf_source_mismatch"].fillna(False)
+    df["any_source_mismatch"] = (
+        df["metar_source_mismatch"].fillna(False)
+        | df["taf_source_mismatch"].fillna(False)
+        | df["nwp_source_mismatch"].fillna(False)
+    )
     return (
         df.groupby(["model_version", "any_source_mismatch"], dropna=False)
         .agg(

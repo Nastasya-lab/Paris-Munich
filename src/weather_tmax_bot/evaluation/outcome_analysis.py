@@ -137,11 +137,19 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         df["metar_source_mismatch"] = False
     if "taf_source_mismatch" not in df.columns:
         df["taf_source_mismatch"] = False
+    if "nwp_source_mismatch" not in df.columns:
+        df["nwp_source_mismatch"] = False
     if "metar_source_compatibility_status" not in df.columns:
         df["metar_source_compatibility_status"] = "unknown"
     if "taf_source_compatibility_status" not in df.columns:
         df["taf_source_compatibility_status"] = "unknown"
-    df["any_source_mismatch"] = df["metar_source_mismatch"].fillna(False) | df["taf_source_mismatch"].fillna(False)
+    if "nwp_source_compatibility_status" not in df.columns:
+        df["nwp_source_compatibility_status"] = "unknown"
+    df["any_source_mismatch"] = (
+        df["metar_source_mismatch"].fillna(False)
+        | df["taf_source_mismatch"].fillna(False)
+        | df["nwp_source_mismatch"].fillna(False)
+    )
     return {
         "status": "ready",
         "rows": len(df),
@@ -163,6 +171,7 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         "by_source_mismatch": _group_summary(df, ["any_source_mismatch"]),
         "by_metar_compatibility": _group_summary(df, ["metar_source_compatibility_status"]),
         "by_taf_compatibility": _group_summary(df, ["taf_source_compatibility_status"]),
+        "by_nwp_compatibility": _group_summary(df, ["nwp_source_compatibility_status"]),
         "worst_by_crps": _records(
             df.sort_values("crps", ascending=False).head(10)[
                 [

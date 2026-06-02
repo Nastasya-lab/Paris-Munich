@@ -299,6 +299,31 @@ def test_metar_event_message_includes_intraday_ml_shadow_probabilities():
     assert "\u0428\u0430\u043d\u0441 \u0440\u043e\u0441\u0442\u0430 \u0435\u0449\u0435 \u043c\u0438\u043d\u0438\u043c\u0443\u043c \u043d\u0430 +3 \u00b0C: 10.0%" in text
 
 
+def test_metar_event_message_includes_source_compatibility_audit():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.4,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {},
+            "probabilities_by_integer_c": {"22": 1.0},
+            "forecast_components": {"intraday_update": {}},
+            "source_compatibility": {
+                "metar": {"status": "known_compatible", "runtime_source_id": "awc.metar.live.EDDM"},
+                "taf": {"status": "exact_match", "runtime_source_id": "iem.taf.archive.EDDM"},
+                "nwp": {"status": "missing", "runtime_source_id": None},
+            },
+        },
+        {"previous": None, "current": {}, "deltas": {}},
+    )
+
+    assert "Контроль источников" in text
+    assert "awc.metar.live.EDDM" in text
+    assert "отличается, но признан совместимым" in text
+
+
 def test_outcome_and_healthcheck_messages_are_russian():
     outcome = telegram.format_outcome_update_message(
         {"status": {"pending_rows": 2, "ready_rows": 0}, "ran_refresh": False}

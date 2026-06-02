@@ -33,9 +33,13 @@ def assess_forecast_quality(feature_snapshot: dict, warnings: list[str] | None =
         except (TypeError, ValueError):
             pass
 
-    unknown_source = any(item.get("status") == "unknown_runtime_source" for item in source_compatibility.values())
-    known_compatible = any(item.get("status") == "known_runtime_compatible" for item in source_compatibility.values())
-    if unknown_source:
+    forbidden_source = any(item.get("status") == "forbidden_mismatch" or item.get("blocking") for item in source_compatibility.values())
+    unknown_source = any(item.get("status") == "unknown_mismatch" for item in source_compatibility.values())
+    known_compatible = any(item.get("status") == "known_compatible" for item in source_compatibility.values())
+    if forbidden_source:
+        invalid = True
+        reasons.append("forbidden runtime source differs from training source")
+    elif unknown_source:
         reasons.append("unknown runtime source differs from training source")
     elif known_compatible:
         cautions.append("known compatible runtime source differs from training source")
@@ -66,6 +70,10 @@ def _recommendation(status: str, reasons: list[str], cautions: list[str] | None 
         return "Prefer configured issue times 00/03/06/09/12/15/18 UTC or ICON availability-aware +01:40 slots."
     if any("known compatible runtime source" in caution for caution in cautions):
         return "Use forecast with monitoring; runtime source is known-compatible but should be tracked separately."
+    if any("forbidden runtime source" in reason for reason in reasons):
+        return "Do not use this forecast operationally; runtime source is forbidden for the trained feature role."
+    if any("unknown runtime source" in reason for reason in reasons):
+        return "Treat this forecast as degraded; verify source compatibility before operational use."
     if any("minor live feature extrapolation" in caution for caution in cautions):
         return "Use forecast with monitoring; live feature is slightly outside the training envelope."
     return "Treat this forecast as usable but lower confidence; review warnings and monitoring reports."

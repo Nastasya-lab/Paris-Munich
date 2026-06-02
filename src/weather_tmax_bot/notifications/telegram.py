@@ -27,6 +27,8 @@ MESSAGE_LABELS = {
     "known compatible runtime source differs from training source": "оперативный источник отличается от обучающего, но признан совместимым",
     "minor live feature extrapolation": "некоторые текущие значения немного выходят за обучающий диапазон",
     "issue time is outside configured training schedule": "ручной запуск выполнен вне обученного временного слота",
+    "unknown runtime source differs from training source": "источник отличается от обучающего, совместимость не подтверждена",
+    "forbidden runtime source differs from training source": "источник запрещен для этой роли модели",
 }
 NEXT_ACTION_LABELS = {
     "review_outcome_analysis_and_continue_monitoring": "продолжать накопление прогнозов и контроль качества",
@@ -92,6 +94,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         "",
         "<b>Данные</b>",
         *_format_freshness(refresh),
+        *_format_source_compatibility(forecast.get("source_compatibility", {})),
         f"Общая проверка свежести: {_yes_no((refresh.get('freshness_gate') or {}).get('passed'))}",
         "",
         "<b>Качество прогноза</b>",
@@ -292,6 +295,27 @@ def _format_freshness(refresh: dict) -> list[str]:
     return lines
 
 
+def _format_source_compatibility(sources: dict) -> list[str]:
+    if not sources:
+        return []
+    status_labels = {
+        "exact_match": "совпадает с обучающим",
+        "known_compatible": "отличается, но признан совместимым",
+        "unknown_mismatch": "отличается, совместимость не подтверждена",
+        "forbidden_mismatch": "запрещен для этой роли",
+        "missing": "нет данных",
+    }
+    source_labels = {"metar": "METAR", "taf": "TAF", "nwp": "NWP"}
+    lines = ["", "<b>Контроль источников</b>"]
+    for kind in ("metar", "taf", "nwp"):
+        item = sources.get(kind) or {}
+        status = str(item.get("status", "missing"))
+        runtime = item.get("runtime_source_id")
+        runtime_text = "нет данных" if not runtime else f"<code>{escape(str(runtime))}</code>"
+        lines.append(f"{source_labels[kind]}: {runtime_text}, {status_labels.get(status, escape(status))}")
+    return lines
+
+
 def format_metar_event_message(payload: dict, comparison: dict, reasons: list[str] | None = None) -> str:
     forecast_components = payload.get("forecast_components", {}) or {}
     intraday = forecast_components.get("intraday_update", {}) or {}
@@ -342,6 +366,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
     )
     lines.extend(["", *_format_latest_metar_record(latest_metar)])
     lines.extend(["", *_format_distribution_change(payload, previous)])
+    lines.extend(_format_source_compatibility(payload.get("source_compatibility", {})))
     shadow_final = shadow.get("final_model") or {}
     shadow_intraday = shadow.get("intraday_update") or {}
     if shadow_final:
