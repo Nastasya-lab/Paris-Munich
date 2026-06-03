@@ -579,6 +579,51 @@ def _translate_reason(reason: str) -> str:
     return labels.get(reason, escape(str(reason)))
 
 
+def format_daily_model_report_message(report: dict) -> str:
+    mode = str(report.get("mode", "preliminary_metar"))
+    is_final = mode == "dwd_final"
+    title = "Финальный дневной разбор моделей" if is_final else "Вечерний предварительный разбор моделей"
+    actual_label = "Факт DWD" if is_final else "Предварительный максимум по METAR"
+    lines = [
+        f"<b>{escape(title)}: {escape(str(report.get('airport', 'EDDM')))}</b>",
+        f"Дата: <b>{escape(str(report.get('target_date_local', 'не указана')))}</b>",
+        f"{actual_label}: <b>{float(report.get('actual_tmax_c', 0.0)):.1f} °C</b>",
+        f"Источник факта: {escape(str(report.get('truth_source', 'не указан')))}",
+        "",
+    ]
+    analysis = report.get("analysis") or []
+    if analysis:
+        lines.extend(["<b>Короткий вывод</b>", *[escape(str(item)) for item in analysis], ""])
+    summary = report.get("summary_by_variant") or []
+    if summary:
+        lines.append("<b>Сравнение моделей</b>")
+        for item in summary[:6]:
+            lines.append(
+                f"{escape(str(item.get('forecast_variant')))}: "
+                f"MAE {float(item.get('mae_expected', 0.0)):.2f} °C, "
+                f"bias {float(item.get('bias_expected', 0.0)):+.2f} °C, "
+                f"P(факт. корзина) {float(item.get('mean_probability_actual_integer_bin', 0.0)):.1%}, "
+                f"покрытие {float(item.get('coverage_ratio', 0.0)):.0%}"
+            )
+    best = report.get("best_variant") or {}
+    worst = report.get("worst_variant") or {}
+    if best or worst:
+        lines.append("")
+        lines.append("<b>Итог</b>")
+        if best:
+            lines.append(f"Лучше: <b>{escape(str(best.get('forecast_variant')))}</b>")
+        if worst:
+            lines.append(f"Хуже: <b>{escape(str(worst.get('forecast_variant')))}</b>")
+    if not is_final:
+        lines.extend(
+            [
+                "",
+                "Это не финальная оценка качества: после прихода DWD truth будет отдельный отчет.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def format_outcome_update_message(result: dict) -> str:
     status = result.get("status", {})
     refresh = result.get("refresh_summary") or {}

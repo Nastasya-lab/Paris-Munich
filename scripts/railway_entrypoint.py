@@ -24,6 +24,8 @@ def resolve_job(service_name: str | None, explicit_job: str | None = None) -> st
         return "forecast"
     if "outcome" in normalized and "cron" in normalized:
         return "outcome"
+    if "daily" in normalized and "report" in normalized and "cron" in normalized:
+        return "daily-report"
     if "health" in normalized and "cron" in normalized:
         return "health"
     return "api"

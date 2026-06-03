@@ -21,6 +21,7 @@ from weather_tmax_bot.notifications.telegram import (
     notify_if_configured,
 )
 from weather_tmax_bot.operations.acceptance import evaluate_forecast_acceptance
+from weather_tmax_bot.operations.daily_report import run_daily_model_report
 from weather_tmax_bot.operations.launch_readiness import assess_launch_readiness
 from weather_tmax_bot.operations.metar_event import run_metar_event_cycle
 from weather_tmax_bot.operations.refresh import refresh_operational_data
@@ -269,3 +270,25 @@ def post_pending_truth_cron(
         result["scheduler_healthcheck"] = readiness
         result["healthcheck_telegram_notification"] = notify_if_configured(format_healthcheck_message(readiness))
     return result
+
+
+@app.post("/daily-report")
+def post_daily_report(
+    airport: str = "EDDM",
+    target_date: date | None = None,
+    mode: str = "preliminary_metar",
+    notify: bool = True,
+    force: bool = False,
+    earliest_local_hour: int | None = 20,
+    api_key: str | None = None,
+    x_api_key: str | None = Header(default=None),
+):
+    _require_api_key(x_api_key=x_api_key, api_key=api_key)
+    return run_daily_model_report(
+        airport=airport,
+        target_date_local=target_date,
+        mode=mode,
+        notify=notify,
+        force=force,
+        earliest_local_hour=earliest_local_hour if mode == "preliminary_metar" else None,
+    )

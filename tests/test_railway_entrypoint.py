@@ -8,6 +8,7 @@ def test_railway_entrypoint_routes_service_names_to_jobs():
     assert resolve_job("forecast-cron") == "forecast"
     assert resolve_job("metar-cron") == "metar-event"
     assert resolve_job("outcome-cron") == "outcome"
+    assert resolve_job("daily-report-cron") == "daily-report"
     assert resolve_job("scheduler-health-cron") == "health"
     assert resolve_job("whatever", explicit_job="forecast") == "forecast"
 

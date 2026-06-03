@@ -11,7 +11,7 @@ import typer
 
 
 def main(
-    job: str = typer.Argument(..., help="forecast, metar-event, outcome, or health"),
+    job: str = typer.Argument(..., help="forecast, metar-event, outcome, daily-report, or health"),
     base_url: str | None = typer.Option(None),
     airport: str = typer.Option("EDDM"),
     target_date: str | None = typer.Option(None),
@@ -64,6 +64,21 @@ def main(
             headers=headers,
             timeout=timeout,
         )
+    elif job == "daily-report":
+        target = target_date or datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
+        response = requests.post(
+            f"{base}/daily-report",
+            params={
+                "airport": airport,
+                "target_date": target,
+                "mode": "preliminary_metar",
+                "notify": True,
+                "force": False,
+                "earliest_local_hour": 20,
+            },
+            headers=headers,
+            timeout=timeout,
+        )
     elif job == "health":
         response = requests.post(
             f"{base}/scheduler-healthcheck",
@@ -72,7 +87,7 @@ def main(
             timeout=timeout,
         )
     else:
-        raise typer.BadParameter("job must be forecast, metar-event, outcome, or health")
+        raise typer.BadParameter("job must be forecast, metar-event, outcome, daily-report, or health")
     response.raise_for_status()
     print(json.dumps(_compact_job_result(job, response.json()), indent=2, default=str))
 
@@ -155,6 +170,16 @@ def _compact_job_result(job: str, payload: dict) -> dict:
                 "reports_updated": payload.get("reports_updated"),
                 "pending_rows": (payload.get("status") or {}).get("pending_rows"),
                 "ready_rows": (payload.get("status") or {}).get("ready_rows"),
+            }
+        )
+    elif job == "daily-report":
+        compact.update(
+            {
+                "mode": payload.get("mode"),
+                "reason": payload.get("reason"),
+                "best_variant": (payload.get("best_variant") or {}).get("forecast_variant"),
+                "worst_variant": (payload.get("worst_variant") or {}).get("forecast_variant"),
+                "notification_sent": (payload.get("telegram_notification") or {}).get("sent"),
             }
         )
     elif job == "health":

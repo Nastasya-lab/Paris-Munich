@@ -5,6 +5,7 @@ from datetime import date
 from weather_tmax_bot.evaluation.first_analysis import write_first_analysis_report
 from weather_tmax_bot.evaluation.monitoring import write_monitoring_report
 from weather_tmax_bot.evaluation.promotion_gate import write_safe_blend_promotion_gate_report, write_shadow_promotion_gate_report
+from weather_tmax_bot.operations.daily_report import run_daily_model_report
 from weather_tmax_bot.operations.truth_refresh import plan_pending_truth_refresh, refresh_pending_truth
 
 
@@ -45,6 +46,21 @@ def run_pending_truth_cron(
         write_monitoring_report()
         write_first_analysis_report()
         reports_updated = True
+    final_daily_reports = []
+    if ran_refresh:
+        for value in (refresh_summary or {}).get("plan", {}).get("dates_to_refresh", []):
+            try:
+                final_daily_reports.append(
+                    run_daily_model_report(
+                        target_date_local=date.fromisoformat(str(value)),
+                        mode="dwd_final",
+                        notify=True,
+                        force=False,
+                        earliest_local_hour=None,
+                    )
+                )
+            except ValueError:
+                continue
     return {
         "status": after,
         "status_before": before,
@@ -53,6 +69,7 @@ def run_pending_truth_cron(
         "reports_updated": reports_updated,
         "shadow_promotion_gate": promotion_gate,
         "safe_blend_promotion_gate": safe_blend_gate,
+        "final_daily_reports": final_daily_reports,
         "recommendation": _cron_recommendation(before, after, fetch=fetch, ran_refresh=ran_refresh),
     }
 

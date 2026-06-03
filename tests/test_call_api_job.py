@@ -79,3 +79,25 @@ def test_compact_job_result_omits_large_forecast_payload():
     assert compact["notification_sent"] is True
     assert "forecast" not in compact
     assert "telegram_notification" not in compact
+
+
+def test_compact_daily_report_result_keeps_model_summary():
+    module = _load_job_module()
+
+    compact = module._compact_job_result(
+        "daily-report",
+        {
+            "status": "ok",
+            "airport": "EDDM",
+            "target_date_local": "2026-06-02",
+            "mode": "preliminary_metar",
+            "best_variant": {"forecast_variant": "shadow_safe_blend"},
+            "worst_variant": {"forecast_variant": "base_prior"},
+            "telegram_notification": {"sent": True, "response": {"large": "body"}},
+        },
+    )
+
+    assert compact["best_variant"] == "shadow_safe_blend"
+    assert compact["worst_variant"] == "base_prior"
+    assert compact["notification_sent"] is True
+    assert "telegram_notification" not in compact
