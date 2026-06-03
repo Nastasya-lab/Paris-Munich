@@ -43,6 +43,18 @@ def main(
             headers=headers,
             timeout=timeout,
         )
+        response.raise_for_status()
+        payload = response.json()
+        _attach_daily_report_if_enabled(
+            payload,
+            base=base,
+            headers=headers,
+            airport=airport,
+            target=target,
+            request_timeout=timeout,
+        )
+        print(json.dumps(_compact_job_result(job, payload), indent=2, default=str))
+        return
     elif job == "metar-event":
         target = target_date or datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
         result = _run_metar_event_with_optional_polling(
@@ -54,6 +66,14 @@ def main(
             request_timeout=timeout,
             poll_timeout_seconds=poll_timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
+        )
+        _attach_daily_report_if_enabled(
+            result,
+            base=base,
+            headers=headers,
+            airport=airport,
+            target=target,
+            request_timeout=timeout,
         )
         print(json.dumps(_compact_job_result(job, result), indent=2, default=str))
         return
@@ -90,6 +110,53 @@ def main(
         raise typer.BadParameter("job must be forecast, metar-event, outcome, daily-report, or health")
     response.raise_for_status()
     print(json.dumps(_compact_job_result(job, response.json()), indent=2, default=str))
+
+
+def _attach_daily_report_if_enabled(
+    payload: dict,
+    *,
+    base: str,
+    headers: dict[str, str],
+    airport: str,
+    target: str,
+    request_timeout: int,
+) -> None:
+    if os.getenv("WEATHER_TMAX_EMBED_DAILY_REPORT", "1").strip().lower() in {"0", "false", "no"}:
+        return
+    report = _call_preliminary_daily_report(
+        base=base,
+        headers=headers,
+        airport=airport,
+        target=target,
+        request_timeout=request_timeout,
+    )
+    if report.get("status") == "ok" or (report.get("telegram_notification") or {}).get("already_sent"):
+        payload["daily_report"] = report
+
+
+def _call_preliminary_daily_report(
+    *,
+    base: str,
+    headers: dict[str, str],
+    airport: str,
+    target: str,
+    request_timeout: int,
+) -> dict:
+    response = requests.post(
+        f"{base}/daily-report",
+        params={
+            "airport": airport,
+            "target_date": target,
+            "mode": "preliminary_metar",
+            "notify": True,
+            "force": False,
+            "earliest_local_hour": 20,
+        },
+        headers=headers,
+        timeout=request_timeout,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def _run_metar_event_with_optional_polling(
@@ -184,6 +251,20 @@ def _compact_job_result(job: str, payload: dict) -> dict:
         )
     elif job == "health":
         compact["ready_for_forward_ops"] = payload.get("ready_for_forward_ops")
+    daily_report = payload.get("daily_report") or {}
+    if daily_report:
+        compact["daily_report"] = {
+            key: value
+            for key, value in {
+                "status": daily_report.get("status"),
+                "mode": daily_report.get("mode"),
+                "best_variant": (daily_report.get("best_variant") or {}).get("forecast_variant"),
+                "worst_variant": (daily_report.get("worst_variant") or {}).get("forecast_variant"),
+                "notification_sent": (daily_report.get("telegram_notification") or {}).get("sent"),
+                "already_sent": (daily_report.get("telegram_notification") or {}).get("already_sent"),
+            }.items()
+            if value is not None
+        }
     return {key: value for key, value in compact.items() if value is not None}
 
 

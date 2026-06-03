@@ -101,3 +101,73 @@ def test_compact_daily_report_result_keeps_model_summary():
     assert compact["worst_variant"] == "base_prior"
     assert compact["notification_sent"] is True
     assert "telegram_notification" not in compact
+
+
+def test_forecast_job_attaches_daily_report_when_available(monkeypatch, capsys):
+    module = _load_job_module()
+    calls = []
+
+    class DummyResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_post(url, params, headers, timeout):
+        calls.append((url, params))
+        if url.endswith("/operational-cycle"):
+            return DummyResponse({"airport": "EDDM", "forecast_quality": {"status": "ok"}})
+        return DummyResponse(
+            {
+                "status": "ok",
+                "mode": "preliminary_metar",
+                "best_variant": {"forecast_variant": "shadow_safe_blend"},
+                "worst_variant": {"forecast_variant": "base_prior"},
+                "telegram_notification": {"sent": True},
+            }
+        )
+
+    monkeypatch.setenv("MUNICH_API_BASE_URL", "https://example.test")
+    monkeypatch.setattr(module.requests, "post", fake_post)
+
+    module.main(
+        job="forecast",
+        base_url=None,
+        airport="EDDM",
+        target_date="2026-06-02",
+        issue_time="now",
+        timeout=10,
+        poll_timeout_seconds=0,
+        poll_interval_seconds=30,
+    )
+
+    out = capsys.readouterr().out
+    assert len(calls) == 2
+    assert calls[1][0].endswith("/daily-report")
+    assert '"daily_report"' in out
+    assert "shadow_safe_blend" in out
+
+
+def test_daily_report_not_ready_is_not_logged(monkeypatch):
+    module = _load_job_module()
+    payload = {"airport": "EDDM"}
+
+    def fake_call(**kwargs):
+        return {"status": "not_ready", "reason": "before_earliest_local_hour"}
+
+    monkeypatch.setattr(module, "_call_preliminary_daily_report", fake_call)
+
+    module._attach_daily_report_if_enabled(
+        payload,
+        base="https://example.test",
+        headers={},
+        airport="EDDM",
+        target="2026-06-02",
+        request_timeout=10,
+    )
+
+    assert "daily_report" not in payload
