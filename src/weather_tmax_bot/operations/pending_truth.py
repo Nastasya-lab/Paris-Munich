@@ -4,7 +4,7 @@ from datetime import date
 
 from weather_tmax_bot.evaluation.first_analysis import write_first_analysis_report
 from weather_tmax_bot.evaluation.monitoring import write_monitoring_report
-from weather_tmax_bot.evaluation.promotion_gate import write_safe_blend_promotion_gate_report, write_shadow_promotion_gate_report
+from weather_tmax_bot.evaluation.promotion_gate import write_shadow_promotion_gate_report
 from weather_tmax_bot.operations.daily_report import run_daily_model_report
 from weather_tmax_bot.operations.truth_refresh import plan_pending_truth_refresh, refresh_pending_truth
 
@@ -39,10 +39,8 @@ def run_pending_truth_cron(
     after = pending_truth_status(as_of_date=as_of_date, min_lag_days=min_lag_days)
     reports_updated = False
     promotion_gate = None
-    safe_blend_gate = None
     if update_reports:
         promotion_gate = write_shadow_promotion_gate_report()
-        safe_blend_gate = write_safe_blend_promotion_gate_report()
         write_monitoring_report()
         write_first_analysis_report()
         reports_updated = True
@@ -68,7 +66,6 @@ def run_pending_truth_cron(
         "ran_refresh": ran_refresh,
         "reports_updated": reports_updated,
         "shadow_promotion_gate": promotion_gate,
-        "safe_blend_promotion_gate": safe_blend_gate,
         "final_daily_reports": final_daily_reports,
         "recommendation": _cron_recommendation(before, after, fetch=fetch, ran_refresh=ran_refresh),
     }

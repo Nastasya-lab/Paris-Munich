@@ -44,9 +44,15 @@ def test_run_prediction_logs_acceptance_metadata(tmp_path, monkeypatch):
     assert "forecast_acceptance" in record["raw_input_metadata"]
     assert "forecast_variants" in record["raw_input_metadata"]
     assert "production_champion" in record["raw_input_metadata"]["forecast_variants"]
-    assert "shadow_seasonal_intraday" in record["raw_input_metadata"]["forecast_variants"]
-    assert "shadow_safe_blend" in record["raw_input_metadata"]["forecast_variants"]
     assert "shadow_phase_arbitrated" in record["raw_input_metadata"]["forecast_variants"]
+    assert set(record["raw_input_metadata"]["forecast_variants"]) == {
+        "production_champion",
+        "shadow_phase_arbitrated",
+    }
+    assert "component_variants" in record["raw_input_metadata"]
+    assert "shadow_seasonal_intraday" in record["raw_input_metadata"]["component_variants"]
+    assert "shadow_safe_blend" in record["raw_input_metadata"]["component_variants"]
+    assert "growth_potential" in record["raw_input_metadata"]
     assert "ml_shadow_mode" in record["raw_input_metadata"]["forecast_components"]
     assert "blended_shadow_mode" in record["raw_input_metadata"]["forecast_components"]
     assert "phase_arbitrated_shadow_mode" in record["raw_input_metadata"]["forecast_components"]

@@ -85,7 +85,7 @@ def predict_best_available(
         source_compatibility = assess_source_compatibility(feature_row)
         feature_row["source_compatibility"] = source_compatibility["sources"]
         warnings.extend(source_compatibility["warnings"])
-        feature_row["forecast_variants"] = {
+        component_variants = {
             "production_champion": {
                 "description": "Operational distribution returned to users.",
                 "distribution": dist.to_payload(),
@@ -109,7 +109,7 @@ def predict_best_available(
         }
         if ml_shadow_dist is not None:
             ml_calibrated = ml_shadow_details.get("calibration_status") == "contextual_out_of_fold_survival_calibrated"
-            feature_row["forecast_variants"]["shadow_intraday_ml"] = {
+            component_variants["shadow_intraday_ml"] = {
                 "description": (
                     "Preliminary calibrated ordinal remaining-upside ML shadow challenger."
                     if ml_calibrated
@@ -121,7 +121,7 @@ def predict_best_available(
                     **ml_shadow_details,
                 },
             }
-        model_disagreement = assess_model_disagreement(feature_row["forecast_variants"])
+        model_disagreement = assess_model_disagreement(component_variants)
         feature_row["model_disagreement"] = model_disagreement
         blended_shadow = build_blended_shadow_candidate(
             dist,
@@ -132,7 +132,7 @@ def predict_best_available(
             source_compatibility=feature_row["source_compatibility"],
             freshness=feature_row["freshness"],
         )
-        feature_row["forecast_variants"]["shadow_safe_blend"] = {
+        component_variants["shadow_safe_blend"] = {
             "description": "Conservative smooth blended shadow candidate; never used as the operational forecast.",
             "distribution": blended_shadow.distribution.to_payload(),
             "metadata": blended_shadow.details,
@@ -144,11 +144,16 @@ def predict_best_available(
             ml_shadow=ml_shadow_dist,
             local_hour=float(intraday.details.get("local_issue_hour") or 0.0),
         )
-        feature_row["forecast_variants"]["shadow_phase_arbitrated"] = {
-            "description": "Phase-arbitrated shadow candidate based on operational ablation; never used as the operational forecast.",
-            "distribution": phase_arbitrated.distribution.to_payload(),
-            "metadata": phase_arbitrated.details,
+        feature_row["forecast_variants"] = {
+            "production_champion": component_variants["production_champion"],
+            "shadow_phase_arbitrated": {
+                "description": "Phase-arbitrated shadow candidate based on operational ablation; never used as the operational forecast.",
+                "distribution": phase_arbitrated.distribution.to_payload(),
+                "metadata": phase_arbitrated.details,
+            },
         }
+        feature_row["component_variants"] = component_variants
+        feature_row["growth_potential"] = _growth_potential_payload(ml_shadow_details)
         feature_row["intraday_update"] = intraday.details
         feature_row["shadow_intraday_update"] = shadow_intraday.details
         feature_row["forecast_components"] = {
@@ -227,6 +232,19 @@ def _predict_intraday_ml_shadow(feature_row: dict, model_path: str | Path = "dat
         return model.predict_distribution(feature_row)
     except (AttributeError, ImportError, ModuleNotFoundError, ValueError, TypeError) as exc:
         return None, {"active": False, "reason": f"intraday_ml_prediction_unavailable: {exc}"}
+
+
+def _growth_potential_payload(ml_shadow_details: dict) -> dict:
+    return {
+        "source": "shadow_intraday_ml_remaining_upside",
+        "active": bool(ml_shadow_details.get("active")),
+        "probability_peak_already_passed": ml_shadow_details.get("probability_peak_already_passed"),
+        "probability_upside_ge_1c": ml_shadow_details.get("probability_upside_ge_1c"),
+        "probability_upside_ge_2c": ml_shadow_details.get("probability_upside_ge_2c"),
+        "probability_upside_ge_3c": ml_shadow_details.get("probability_upside_ge_3c"),
+        "calibration_status": ml_shadow_details.get("calibration_status"),
+        "reason": ml_shadow_details.get("reason"),
+    }
 
 
 def _synthetic_targets() -> pd.DataFrame:

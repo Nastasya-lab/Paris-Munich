@@ -6,10 +6,8 @@ from pathlib import Path
 import pandas as pd
 
 CHAMPION_VARIANT = "production_champion"
-SHADOW_VARIANT = "shadow_seasonal_intraday"
-PHASE_AWARE_SHADOW_VERSION = "phase_aware_intraday_challenger_v3"
-SAFE_BLEND_SHADOW_VARIANT = "shadow_safe_blend"
-SAFE_BLEND_SHADOW_VERSION = "blended_shadow_candidate_v1"
+SHADOW_VARIANT = "shadow_phase_arbitrated"
+PHASE_AWARE_SHADOW_VERSION = "phase_arbitrated_shadow_v1"
 
 
 def evaluate_shadow_promotion_gate(
@@ -165,20 +163,6 @@ def write_shadow_promotion_gate_report(
     json_output.write_text(json.dumps(gate, indent=2, default=str), encoding="utf-8")
     markdown_output.write_text(format_shadow_promotion_gate_markdown(gate), encoding="utf-8")
     return gate
-
-
-def write_safe_blend_promotion_gate_report(
-    variant_monitoring_path: str | Path = "data/reports/forecast_variant_monitoring.parquet",
-    json_path: str | Path = "data/reports/safe_blend_promotion_gate.json",
-    markdown_path: str | Path = "docs/safe_blend_promotion_gate.md",
-) -> dict:
-    return write_shadow_promotion_gate_report(
-        variant_monitoring_path=variant_monitoring_path,
-        json_path=json_path,
-        markdown_path=markdown_path,
-        shadow_variant=SAFE_BLEND_SHADOW_VARIANT,
-        shadow_version=SAFE_BLEND_SHADOW_VERSION,
-    )
 
 
 def format_shadow_promotion_gate_markdown(gate: dict) -> str:

@@ -14,7 +14,7 @@ def test_preliminary_daily_report_scores_variants_from_forecast_log(tmp_path):
         expected_probs={"25": 0.8, "26": 0.2},
         variants={
             "base_prior": {"distribution": {"probabilities_by_integer_c": {"26": 0.8, "27": 0.2}}},
-            "shadow_safe_blend": {"distribution": {"probabilities_by_integer_c": {"25": 0.95, "26": 0.05}}},
+            "shadow_phase_arbitrated": {"distribution": {"probabilities_by_integer_c": {"25": 0.95, "26": 0.05}}},
         },
         observed_max=25.0,
     )
@@ -29,8 +29,9 @@ def test_preliminary_daily_report_scores_variants_from_forecast_log(tmp_path):
 
     assert report["status"] == "ok"
     assert report["actual_tmax_c"] == 25.0
-    assert report["best_variant"]["forecast_variant"] == "shadow_safe_blend"
-    assert report["worst_variant"]["forecast_variant"] == "base_prior"
+    assert report["best_variant"]["forecast_variant"] == "shadow_phase_arbitrated"
+    assert report["worst_variant"]["forecast_variant"] == "production_champion"
+    assert report["hourly_comparison"][0]["best_variant"] == "shadow_phase_arbitrated"
 
 
 def test_final_daily_report_scores_dwd_variant_monitoring(tmp_path):
@@ -38,7 +39,7 @@ def test_final_daily_report_scores_dwd_variant_monitoring(tmp_path):
     pd.DataFrame(
         [
             _scored_row("f1", "production_champion", 25.0, 25.3, 0.7),
-            _scored_row("f1", "shadow_safe_blend", 25.0, 25.1, 0.9),
+            _scored_row("f1", "shadow_phase_arbitrated", 25.0, 25.1, 0.9),
             _scored_row("f1", "base_prior", 25.0, 27.0, 0.05),
         ]
     ).to_parquet(variant_path, index=False)
@@ -52,7 +53,7 @@ def test_final_daily_report_scores_dwd_variant_monitoring(tmp_path):
 
     assert report["status"] == "ok"
     assert report["truth_source"] == "DWD 10-minute truth"
-    assert report["best_variant"]["forecast_variant"] == "shadow_safe_blend"
+    assert report["best_variant"]["forecast_variant"] == "shadow_phase_arbitrated"
 
 
 def test_final_daily_report_waits_for_dwd_scored_rows(tmp_path):
@@ -111,24 +112,36 @@ def test_daily_report_message_is_human_readable():
             "mode": "preliminary_metar",
             "actual_tmax_c": 25.0,
             "truth_source": "operational METAR max",
-            "analysis": ["Лучше всего выглядел shadow_safe_blend."],
+            "analysis": ["Лучше всего выглядел shadow_phase_arbitrated."],
             "summary_by_variant": [
                 {
-                    "forecast_variant": "shadow_safe_blend",
+                    "forecast_variant": "shadow_phase_arbitrated",
                     "mae_expected": 0.2,
                     "bias_expected": 0.1,
                     "mean_probability_actual_integer_bin": 0.8,
                     "coverage_ratio": 1.0,
                 }
             ],
-            "best_variant": {"forecast_variant": "shadow_safe_blend"},
-            "worst_variant": {"forecast_variant": "base_prior"},
+            "best_variant": {"forecast_variant": "shadow_phase_arbitrated"},
+            "worst_variant": {"forecast_variant": "production_champion"},
+            "hourly_comparison": [
+                {
+                    "local_hour": 18,
+                    "best_variant": "shadow_phase_arbitrated",
+                    "variants": [
+                        {"forecast_variant": "shadow_phase_arbitrated", "mae_expected": 0.2},
+                        {"forecast_variant": "production_champion", "mae_expected": 0.5},
+                    ],
+                }
+            ],
         }
     )
 
     assert "Вечерний предварительный разбор моделей" in text
     assert "Предварительный максимум по METAR" in text
-    assert "shadow_safe_blend" in text
+    assert "shadow_phase_arbitrated" in text
+    assert "production_champion" in text
+    assert "18:00" in text
     assert "после прихода DWD truth" in text
 
 

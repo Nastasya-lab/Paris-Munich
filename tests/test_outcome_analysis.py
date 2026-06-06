@@ -46,7 +46,8 @@ def test_outcome_analysis_ready_with_scored_rows(tmp_path):
     pd.DataFrame(
         {
             "forecast_id": ["f1", "f1"],
-            "forecast_variant": ["production_champion", "shadow_seasonal_intraday"],
+            "issue_time_utc": ["2026-07-15T06:00:00+00:00", "2026-07-15T06:00:00+00:00"],
+            "forecast_variant": ["production_champion", "shadow_phase_arbitrated"],
             "model_version": ["m1", "m1"],
             "target_date_local": ["2026-07-15", "2026-07-15"],
             "actual_tmax_c": [25.0, 25.0],
@@ -58,6 +59,9 @@ def test_outcome_analysis_ready_with_scored_rows(tmp_path):
             "brier_ge_25": [0.2, 0.04],
             "brier_ge_30": [0.3, 0.02],
             "probability_actual_integer_bin": [0.2, 0.7],
+            "probability_above_actual_integer_bin": [0.1, 0.05],
+            "coverage_80": [True, True],
+            "variant_version": ["production_dynamic_v1", "phase_arbitrated_shadow_v1"],
         }
     ).to_parquet(variant_path, index=False)
 
@@ -72,7 +76,7 @@ def test_outcome_analysis_ready_with_scored_rows(tmp_path):
     assert analysis["overall"]["forecasts"] == 2
     assert {row["forecast_variant"] for row in analysis["by_forecast_variant"]} == {
         "production_champion",
-        "shadow_seasonal_intraday",
+        "shadow_phase_arbitrated",
     }
     assert analysis["champion_vs_shadow"]["paired_forecasts"] == 1
     assert analysis["champion_vs_shadow"]["shadow_mae_win_rate"] == 1.0

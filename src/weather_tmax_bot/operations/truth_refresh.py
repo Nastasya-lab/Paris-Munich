@@ -10,7 +10,7 @@ from weather_tmax_bot.data.storage import write_parquet
 from weather_tmax_bot.evaluation.operational_monitoring import build_operational_monitoring_tables
 from weather_tmax_bot.evaluation.outcome_analysis import build_outcome_analysis
 from weather_tmax_bot.evaluation.outcomes import build_forecast_outcome_status, update_forecast_outcomes
-from weather_tmax_bot.evaluation.promotion_gate import write_safe_blend_promotion_gate_report, write_shadow_promotion_gate_report
+from weather_tmax_bot.evaluation.promotion_gate import write_shadow_promotion_gate_report
 from weather_tmax_bot.features.build_target import build_daily_tmax
 
 
@@ -128,11 +128,6 @@ def refresh_pending_truth(
         json_path=Path(reports_dir) / "shadow_promotion_gate.json",
         markdown_path="docs/shadow_promotion_gate.md",
     )
-    safe_blend_gate = write_safe_blend_promotion_gate_report(
-        variant_monitoring_path=variant_monitoring_path,
-        json_path=Path(reports_dir) / "safe_blend_promotion_gate.json",
-        markdown_path="docs/safe_blend_promotion_gate.md",
-    )
     summary.update(
         {
             "fetched_rows": len(fetched),
@@ -143,7 +138,6 @@ def refresh_pending_truth(
             "outcome_analysis_status": outcome_analysis["status"],
             "outcome_analysis_rows": outcome_analysis["rows"],
             "shadow_promotion_gate_status": promotion_gate["status"],
-            "safe_blend_promotion_gate_status": safe_blend_gate["status"],
         }
     )
     return summary

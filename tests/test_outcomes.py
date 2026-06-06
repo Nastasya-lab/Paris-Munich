@@ -45,11 +45,12 @@ def test_update_forecast_outcomes(tmp_path):
                 "cautions": ["preliminary calibration"],
             },
             "forecast_variants": {
-                "shadow_seasonal_intraday": {
-                    "description": "shadow",
+                "shadow_phase_arbitrated": {
+                    "description": "phase-arbitrated shadow",
                     "distribution": {"probabilities_by_integer_c": {"25": 0.8, "26": 0.2}},
                     "metadata": {
-                        "variant_version": "phase_aware_intraday_challenger_v3",
+                        "variant_version": "phase_arbitrated_shadow_v1",
+                        "selected_variant": "shadow_safe_blend",
                         "forecast_phase": "midday_update",
                         "scenario_tracking": "near_observed_track",
                         "local_issue_hour": 8.0,
@@ -72,10 +73,10 @@ def test_update_forecast_outcomes(tmp_path):
     assert output_path.exists()
     assert variant_output_path.exists()
     variants = pd.read_parquet(variant_output_path)
-    assert set(variants["forecast_variant"]) == {"production_champion", "shadow_seasonal_intraday"}
-    assert variants.loc[variants["forecast_variant"] == "shadow_seasonal_intraday", "probability_actual_integer_bin"].iloc[0] == 0.8
-    shadow = variants[variants["forecast_variant"] == "shadow_seasonal_intraday"].iloc[0]
-    assert shadow["variant_version"] == "phase_aware_intraday_challenger_v3"
+    assert set(variants["forecast_variant"]) == {"production_champion", "shadow_phase_arbitrated"}
+    assert variants.loc[variants["forecast_variant"] == "shadow_phase_arbitrated", "probability_actual_integer_bin"].iloc[0] == 0.8
+    shadow = variants[variants["forecast_variant"] == "shadow_phase_arbitrated"].iloc[0]
+    assert shadow["variant_version"] == "phase_arbitrated_shadow_v1"
     assert shadow["forecast_phase"] == "midday_update"
     assert shadow["scenario_tracking"] == "near_observed_track"
     assert shadow["probability_above_actual_integer_bin"] == 0.2

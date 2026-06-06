@@ -10,6 +10,7 @@ from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, nll_intege
 from weather_tmax_bot.models.distribution import TmaxDistribution
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
+REPORT_VARIANTS = {"production_champion", "shadow_phase_arbitrated"}
 
 
 def update_forecast_outcomes(
@@ -178,23 +179,12 @@ def _variant_rows_from_record(record: dict, actual: float, *, champion_dist: Tma
     for name, payload in (metadata.get("forecast_variants", {}) or {}).items():
         if name == "production_champion":
             continue
+        if name not in REPORT_VARIANTS:
+            continue
         dist = _distribution_from_variant_payload(payload)
         if dist is None:
             continue
         rows.append(_score_distribution_row(record, actual, dist, name, _variant_description(payload), metadata=_variant_metadata(payload)))
-    if not any(row["forecast_variant"] == "shadow_seasonal_intraday" for row in rows):
-        fallback = _fallback_shadow_distribution(metadata)
-        if fallback is not None:
-            rows.append(
-                _score_distribution_row(
-                    record,
-                    actual,
-                    fallback,
-                    "shadow_seasonal_intraday",
-                    "Shadow distribution reconstructed from legacy forecast_components.",
-                    metadata=_fallback_shadow_metadata(metadata),
-                )
-            )
     return rows
 
 

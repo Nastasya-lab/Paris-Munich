@@ -7,6 +7,8 @@ import pandas as pd
 
 from weather_tmax_bot.evaluation.promotion_gate import evaluate_shadow_promotion_gate
 
+PUBLIC_VARIANTS = {"production_champion", "shadow_phase_arbitrated"}
+
 
 def build_outcome_analysis(
     monitoring_path: str | Path = "data/reports/forecast_monitoring.parquet",
@@ -29,16 +31,6 @@ def build_outcome_analysis(
         analysis["by_variant_scenario"] = _variant_context_analysis(variants, ["forecast_variant", "scenario_tracking"])
         analysis["by_variant_local_hour"] = _variant_local_hour_analysis(variants)
         analysis["shadow_promotion_gate"] = evaluate_shadow_promotion_gate(variants)
-        analysis["intraday_ml_promotion_gate"] = evaluate_shadow_promotion_gate(
-            variants,
-            shadow_variant="shadow_intraday_ml",
-            shadow_version="intraday_ml_core_challenger_v1",
-        )
-        analysis["safe_blend_promotion_gate"] = evaluate_shadow_promotion_gate(
-            variants,
-            shadow_variant="shadow_safe_blend",
-            shadow_version="blended_shadow_candidate_v1",
-        )
     else:
         analysis["by_forecast_variant"] = []
         analysis["champion_vs_shadow"] = {}
@@ -46,16 +38,6 @@ def build_outcome_analysis(
         analysis["by_variant_scenario"] = []
         analysis["by_variant_local_hour"] = []
         analysis["shadow_promotion_gate"] = evaluate_shadow_promotion_gate(pd.DataFrame())
-        analysis["intraday_ml_promotion_gate"] = evaluate_shadow_promotion_gate(
-            pd.DataFrame(),
-            shadow_variant="shadow_intraday_ml",
-            shadow_version="intraday_ml_core_challenger_v1",
-        )
-        analysis["safe_blend_promotion_gate"] = evaluate_shadow_promotion_gate(
-            pd.DataFrame(),
-            shadow_variant="shadow_safe_blend",
-            shadow_version="blended_shadow_candidate_v1",
-        )
     if output_json_path is not None:
         output = Path(output_json_path)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -84,14 +66,14 @@ def format_outcome_analysis_markdown(analysis: dict) -> str:
         lines.append("No scored forecasts yet.")
     lines.extend(["", "## By model", ""])
     lines.extend(_table_lines(analysis.get("by_model", [])))
-    lines.extend(["", "## Champion vs shadow", ""])
+    lines.extend(["", "## Public forecast variants", ""])
     lines.extend(_table_lines(analysis.get("by_forecast_variant", [])))
     pair = analysis.get("champion_vs_shadow", {}) or {}
     if pair:
-        lines.extend(["", "## Champion vs shadow paired score", ""])
+        lines.extend(["", "## Champion vs phase-arbitrated paired score", ""])
         lines.extend(f"- `{key}`: `{value}`" for key, value in pair.items())
     gate = analysis.get("shadow_promotion_gate", {}) or {}
-    lines.extend(["", "## Shadow promotion gate", ""])
+    lines.extend(["", "## Phase-arbitrated shadow promotion gate", ""])
     lines.extend(
         [
             f"- `status`: `{gate.get('status')}`",
@@ -101,24 +83,6 @@ def format_outcome_analysis_markdown(analysis: dict) -> str:
     )
     if gate.get("checks"):
         lines.extend(f"- `{key}`: `{value}`" for key, value in gate.get("checks", {}).items())
-    ml_gate = analysis.get("intraday_ml_promotion_gate", {}) or {}
-    lines.extend(["", "## Intraday ML promotion gate", ""])
-    lines.extend(
-        [
-            f"- `status`: `{ml_gate.get('status')}`",
-            f"- `shadow_version`: `{ml_gate.get('shadow_version')}`",
-            f"- `recommendation`: `{ml_gate.get('recommendation')}`",
-        ]
-    )
-    safe_blend_gate = analysis.get("safe_blend_promotion_gate", {}) or {}
-    lines.extend(["", "## Safe blended shadow promotion gate", ""])
-    lines.extend(
-        [
-            f"- `status`: `{safe_blend_gate.get('status')}`",
-            f"- `shadow_version`: `{safe_blend_gate.get('shadow_version')}`",
-            f"- `recommendation`: `{safe_blend_gate.get('recommendation')}`",
-        ]
-    )
     lines.extend(["", "## By variant phase", ""])
     lines.extend(_table_lines(analysis.get("by_variant_phase", [])))
     lines.extend(["", "## By variant scenario", ""])
@@ -188,16 +152,6 @@ def _analysis_from_monitoring(monitoring: pd.DataFrame) -> dict:
         "by_variant_scenario": [],
         "by_variant_local_hour": [],
         "shadow_promotion_gate": evaluate_shadow_promotion_gate(pd.DataFrame()),
-        "intraday_ml_promotion_gate": evaluate_shadow_promotion_gate(
-            pd.DataFrame(),
-            shadow_variant="shadow_intraday_ml",
-            shadow_version="intraday_ml_core_challenger_v1",
-        ),
-        "safe_blend_promotion_gate": evaluate_shadow_promotion_gate(
-            pd.DataFrame(),
-            shadow_variant="shadow_safe_blend",
-            shadow_version="blended_shadow_candidate_v1",
-        ),
         "by_quality": _group_summary(df, ["forecast_quality_status"]),
         "by_acceptance": _group_summary(df, ["forecast_accepted"]),
         "by_model_disagreement": _group_summary(df, ["model_disagreement_severity"]),
@@ -238,16 +192,6 @@ def _empty_analysis(reason: str) -> dict:
         "by_variant_scenario": [],
         "by_variant_local_hour": [],
         "shadow_promotion_gate": evaluate_shadow_promotion_gate(pd.DataFrame()),
-        "intraday_ml_promotion_gate": evaluate_shadow_promotion_gate(
-            pd.DataFrame(),
-            shadow_variant="shadow_intraday_ml",
-            shadow_version="intraday_ml_core_challenger_v1",
-        ),
-        "safe_blend_promotion_gate": evaluate_shadow_promotion_gate(
-            pd.DataFrame(),
-            shadow_variant="shadow_safe_blend",
-            shadow_version="blended_shadow_candidate_v1",
-        ),
         "by_quality": [],
         "by_acceptance": [],
         "by_source_mismatch": [],
@@ -290,6 +234,9 @@ def _variant_analysis(variants: pd.DataFrame) -> list[dict]:
     if variants.empty or "forecast_variant" not in variants.columns:
         return []
     df = variants.copy()
+    df = df[df["forecast_variant"].isin(PUBLIC_VARIANTS)]
+    if df.empty:
+        return []
     _ensure_variant_optional_columns(df)
     df["abs_error_expected_c"] = df["error_expected_c"].abs()
     grouped = (
@@ -316,6 +263,10 @@ def _variant_context_analysis(variants: pd.DataFrame, group_cols: list[str]) -> 
     if variants.empty or not set(group_cols).issubset(variants.columns):
         return []
     df = variants.copy()
+    if "forecast_variant" in df.columns:
+        df = df[df["forecast_variant"].isin(PUBLIC_VARIANTS)]
+    if df.empty:
+        return []
     _ensure_variant_optional_columns(df)
     df["abs_error_expected_c"] = df["error_expected_c"].abs()
     grouped = (
@@ -361,7 +312,8 @@ def _champion_shadow_pair_analysis(variants: pd.DataFrame) -> dict:
     required = {"forecast_id", "forecast_variant", "error_expected_c", "nll", "crps", "probability_actual_integer_bin"}
     if variants.empty or not required.issubset(variants.columns):
         return {}
-    df = variants[variants["forecast_variant"].isin(["production_champion", "shadow_seasonal_intraday"])].copy()
+    shadow_variant = "shadow_phase_arbitrated"
+    df = variants[variants["forecast_variant"].isin(["production_champion", shadow_variant])].copy()
     if df.empty:
         return {}
     df["abs_error_expected_c"] = df["error_expected_c"].abs()
@@ -371,21 +323,21 @@ def _champion_shadow_pair_analysis(variants: pd.DataFrame) -> dict:
         values=["abs_error_expected_c", "nll", "crps", "probability_actual_integer_bin", "probability_above_actual_integer_bin"],
         aggfunc="first",
     )
-    if ("abs_error_expected_c", "production_champion") not in pivot or ("abs_error_expected_c", "shadow_seasonal_intraday") not in pivot:
+    if ("abs_error_expected_c", "production_champion") not in pivot or ("abs_error_expected_c", shadow_variant) not in pivot:
         return {}
     paired = pivot.dropna()
     if paired.empty:
         return {}
     champion_abs = paired[("abs_error_expected_c", "production_champion")]
-    shadow_abs = paired[("abs_error_expected_c", "shadow_seasonal_intraday")]
+    shadow_abs = paired[("abs_error_expected_c", shadow_variant)]
     champion_nll = paired[("nll", "production_champion")]
-    shadow_nll = paired[("nll", "shadow_seasonal_intraday")]
+    shadow_nll = paired[("nll", shadow_variant)]
     champion_crps = paired[("crps", "production_champion")]
-    shadow_crps = paired[("crps", "shadow_seasonal_intraday")]
+    shadow_crps = paired[("crps", shadow_variant)]
     champion_prob = paired[("probability_actual_integer_bin", "production_champion")]
-    shadow_prob = paired[("probability_actual_integer_bin", "shadow_seasonal_intraday")]
+    shadow_prob = paired[("probability_actual_integer_bin", shadow_variant)]
     champion_upside = paired[("probability_above_actual_integer_bin", "production_champion")]
-    shadow_upside = paired[("probability_above_actual_integer_bin", "shadow_seasonal_intraday")]
+    shadow_upside = paired[("probability_above_actual_integer_bin", shadow_variant)]
     return {
         "paired_forecasts": int(len(paired)),
         "shadow_mae_win_rate": float((shadow_abs < champion_abs).mean()),

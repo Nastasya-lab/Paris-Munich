@@ -89,10 +89,8 @@ def format_operational_cycle_message(summary: dict) -> str:
         *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
         *_format_intraday_summary(forecast.get("forecast_components", {})),
-        *_format_shadow_summary(forecast.get("forecast_components", {})),
-        *_format_ml_shadow_summary(forecast.get("forecast_components", {})),
-        *_format_model_disagreement(forecast.get("forecast_components", {})),
-        *_format_blended_shadow_summary(forecast.get("forecast_components", {})),
+        *_format_phase_arbitrated_summary(forecast.get("forecast_components", {})),
+        *_format_growth_potential_summary(forecast.get("forecast_components", {})),
         "",
         "<b>Данные</b>",
         *_format_freshness(refresh),
@@ -274,6 +272,49 @@ def _format_ml_shadow_summary(components: dict) -> list[str]:
     return lines
 
 
+def _format_growth_potential_summary(components: dict) -> list[str]:
+    shadow = (components or {}).get("ml_shadow_mode") or {}
+    details = shadow.get("details") or {}
+    if not details:
+        return []
+    if not details.get("active"):
+        reason = escape(str(details.get("reason", "нет данных")))
+        return ["", "<b>Потенциал роста</b>", f"ML-сигнал недоступен: {reason}"]
+    return [
+        "",
+        "<b>Потенциал роста</b>",
+        f"Вероятность, что пик уже был: {float(details.get('probability_peak_already_passed', 0.0)):.1%}",
+        f"Шанс роста еще минимум на +1 °C: {float(details.get('probability_upside_ge_1c', 0.0)):.1%}",
+        f"Шанс роста еще минимум на +2 °C: {float(details.get('probability_upside_ge_2c', 0.0)):.1%}",
+        f"Шанс роста еще минимум на +3 °C: {float(details.get('probability_upside_ge_3c', 0.0)):.1%}",
+    ]
+
+
+def _format_phase_arbitrated_summary(components: dict) -> list[str]:
+    shadow = (components or {}).get("phase_arbitrated_shadow_mode") or {}
+    if not shadow:
+        return []
+    details = shadow.get("details") or {}
+    final_model = shadow.get("final_model") or {}
+    comparison = shadow.get("comparison_to_champion") or {}
+    selected = str(details.get("selected_variant") or "unknown")
+    selected_label = {
+        "production_champion": "основная модель",
+        "shadow_safe_blend": "дневной safe-blend",
+        "shadow_intraday_ml": "ML remaining-upside",
+        "shadow_seasonal_intraday": "вечерняя seasonal intraday",
+    }.get(selected, selected)
+    return [
+        "",
+        "<b>Экспериментальная модель</b>",
+        "Главный challenger: phase-arbitrated. Не влияет на основной прогноз, только сравнивается.",
+        f"Выбранный компонент: <b>{escape(selected_label)}</b>",
+        f"Ожидаемый максимум: <b>{float(final_model.get('expected_tmax_c', 0.0)):.1f} °C</b> ({_signed_c(comparison.get('expected_tmax_delta_c'))} к основной)",
+        f"Главные корзины: {_format_compact_bins(final_model.get('probabilities_by_integer_c', {}), limit=6)}",
+        f"Причина выбора: {escape(str(details.get('selection_reason', 'не указана')))}",
+    ]
+
+
 def _format_model_disagreement(components: dict) -> list[str]:
     audit = (components or {}).get("model_disagreement") or {}
     if audit.get("status") != "evaluated":
@@ -428,7 +469,9 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
     lines.extend(["", *_format_latest_metar_record(latest_metar)])
     lines.extend(["", *_format_distribution_change(payload, previous)])
     lines.extend(_format_source_compatibility(payload.get("source_compatibility", {})))
-    shadow_final = shadow.get("final_model") or {}
+    lines.extend(_format_phase_arbitrated_summary(forecast_components))
+    lines.extend(_format_growth_potential_summary(forecast_components))
+    shadow_final = {}
     shadow_intraday = shadow.get("intraday_update") or {}
     if shadow_final:
         lines.extend(
@@ -452,9 +495,6 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
                     f"После поправки cap_blend × {float(shadow_intraday.get('survival_adjustment_strength', 0.0)):.2f}: <b>{float(shadow_intraday.get('survival_adjusted_upside_probability', 0.0)):.1%}</b>",
                 ]
             )
-    lines.extend(_format_ml_shadow_summary(forecast_components))
-    lines.extend(_format_model_disagreement(forecast_components))
-    lines.extend(_format_blended_shadow_summary(forecast_components))
     if reasons:
         lines.extend(["", "<b>Почему отправлено</b>", ", ".join(_translate_reason(reason) for reason in reasons)])
     lines.extend(
@@ -605,6 +645,20 @@ def format_daily_model_report_message(report: dict) -> str:
                 f"P(факт. корзина) {float(item.get('mean_probability_actual_integer_bin', 0.0)):.1%}, "
                 f"покрытие {float(item.get('coverage_ratio', 0.0)):.0%}"
             )
+    hourly = report.get("hourly_comparison") or []
+    if hourly:
+        lines.extend(["", "<b>По часам</b>"])
+        for item in hourly[:12]:
+            variants = item.get("variants") or []
+            champion = _find_variant_summary(variants, "production_champion")
+            challenger = _find_variant_summary(variants, "shadow_phase_arbitrated")
+            if champion and challenger:
+                lines.append(
+                    f"{int(item.get('local_hour', 0)):02d}:00: "
+                    f"champion MAE {float(champion.get('mae_expected', 0.0)):.2f} °C, "
+                    f"experimental MAE {float(challenger.get('mae_expected', 0.0)):.2f} °C; "
+                    f"лучше {escape(str(item.get('best_variant')))}"
+                )
     best = report.get("best_variant") or {}
     worst = report.get("worst_variant") or {}
     if best or worst:
@@ -622,6 +676,13 @@ def format_daily_model_report_message(report: dict) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def _find_variant_summary(rows: list[dict], name: str) -> dict | None:
+    for row in rows:
+        if row.get("forecast_variant") == name:
+            return row
+    return None
 
 
 def format_outcome_update_message(result: dict) -> str:

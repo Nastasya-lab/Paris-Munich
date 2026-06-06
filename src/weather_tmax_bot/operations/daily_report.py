@@ -13,6 +13,7 @@ from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.notifications.telegram import format_daily_model_report_message, notify_if_configured
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
+REPORT_VARIANTS = {"production_champion", "shadow_phase_arbitrated"}
 
 
 def run_daily_model_report(
@@ -100,6 +101,8 @@ def _build_final_report(*, airport: str, target_date_local: date, variant_monito
         (frame["airport"].astype(str) == airport)
         & (frame["target_date_local"].astype(str) == target_date_local.isoformat())
     ].copy()
+    if "forecast_variant" in rows.columns:
+        rows = rows[rows["forecast_variant"].isin(REPORT_VARIANTS)].copy()
     if rows.empty:
         return _empty_report(airport, target_date_local, "dwd_final", "no_scored_rows_for_date")
     actual = float(rows["actual_tmax_c"].dropna().iloc[0])
@@ -164,6 +167,7 @@ def _report_from_scored_rows(
         "forecast_count": int(rows["forecast_id"].nunique()) if "forecast_id" in rows else int(len(rows)),
         "variant_record_count": int(len(rows)),
         "summary_by_variant": summary,
+        "hourly_comparison": _hourly_comparison(rows),
         "best_variant": best,
         "worst_variant": worst,
         "analysis": _analysis_text(summary, best, worst, mode),
@@ -239,17 +243,15 @@ def _score_record_variants(record: dict, actual: float) -> list[dict]:
     for name, payload in (metadata.get("forecast_variants", {}) or {}).items():
         if name == "production_champion":
             continue
+        if name not in REPORT_VARIANTS:
+            continue
         dist = _variant_distribution(payload)
         if dist is not None:
             rows.append(_score_distribution(record, actual, str(name), dist))
     fallbacks = {
-        "shadow_seasonal_intraday": ((metadata.get("forecast_components", {}) or {}).get("shadow_mode", {}) or {}).get(
-            "final_model", {}
-        ),
-        "shadow_intraday_ml": ((metadata.get("forecast_components", {}) or {}).get("ml_shadow_mode", {}) or {}).get(
-            "final_model", {}
-        ),
-        "shadow_safe_blend": ((metadata.get("forecast_components", {}) or {}).get("blended_shadow_mode", {}) or {}).get(
+        "shadow_phase_arbitrated": (
+            (metadata.get("forecast_components", {}) or {}).get("phase_arbitrated_shadow_mode", {}) or {}
+        ).get(
             "final_model", {}
         ),
     }
@@ -265,11 +267,14 @@ def _score_record_variants(record: dict, actual: float) -> list[dict]:
 
 def _score_distribution(record: dict, actual: float, variant: str, dist: TmaxDistribution) -> dict:
     actual_bin = int(round(actual))
+    issue_time = record.get("issue_time_utc")
+    local_hour = _local_issue_hour(issue_time)
     return {
         "forecast_id": record.get("forecast_id"),
         "airport": record.get("airport"),
         "target_date_local": record.get("target_date_local"),
         "issue_time_utc": record.get("issue_time_utc"),
+        "local_issue_hour": local_hour,
         "forecast_variant": variant,
         "actual_tmax_c": actual,
         "expected_tmax_c": dist.expected_tmax_c,
@@ -279,6 +284,40 @@ def _score_distribution(record: dict, actual: float, variant: str, dist: TmaxDis
         "probability_actual_integer_bin": float(dist.probabilities[dist.bins_c == actual_bin].sum()),
         "probability_above_actual_integer_bin": float(dist.probabilities[dist.bins_c > actual_bin].sum()),
     }
+
+
+def _hourly_comparison(rows: pd.DataFrame) -> list[dict]:
+    if rows.empty or "local_issue_hour" not in rows.columns:
+        return []
+    frame = rows.copy()
+    frame["local_hour_floor"] = pd.to_numeric(frame["local_issue_hour"], errors="coerce").astype("Int64")
+    frame = frame[frame["local_hour_floor"].notna()]
+    out = []
+    for hour, group in frame.groupby("local_hour_floor"):
+        variants = _summary_by_variant(group)
+        if not variants:
+            continue
+        out.append(
+            {
+                "local_hour": int(hour),
+                "best_variant": variants[0]["forecast_variant"],
+                "variants": variants,
+            }
+        )
+    return sorted(out, key=lambda item: item["local_hour"])
+
+
+def _local_issue_hour(value) -> float | None:
+    if not value:
+        return None
+    try:
+        parsed = pd.Timestamp(str(value))
+        if parsed.tzinfo is None:
+            parsed = parsed.tz_localize("UTC")
+        local = parsed.tz_convert(LOCAL_TZ)
+        return float(local.hour + local.minute / 60)
+    except (TypeError, ValueError):
+        return None
 
 
 def _variant_distribution(payload: dict) -> TmaxDistribution | None:
