@@ -12,6 +12,7 @@ from weather_tmax_bot.models.disagreement import assess_model_disagreement
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
 from weather_tmax_bot.models.intraday_update import apply_intraday_update
 from weather_tmax_bot.models.model_registry import load_model, resolve_active_artifacts
+from weather_tmax_bot.models.phase_arbitration import build_phase_arbitrated_candidate
 from weather_tmax_bot.models.safe_blend import build_blended_shadow_candidate
 from weather_tmax_bot.temporal.freshness import assess_feature_freshness
 from weather_tmax_bot.temporal.source_compatibility import assess_source_compatibility
@@ -136,6 +137,18 @@ def predict_best_available(
             "distribution": blended_shadow.distribution.to_payload(),
             "metadata": blended_shadow.details,
         }
+        phase_arbitrated = build_phase_arbitrated_candidate(
+            champion=dist,
+            safe_blend=blended_shadow.distribution,
+            seasonal_shadow=shadow_intraday.distribution,
+            ml_shadow=ml_shadow_dist,
+            local_hour=float(intraday.details.get("local_issue_hour") or 0.0),
+        )
+        feature_row["forecast_variants"]["shadow_phase_arbitrated"] = {
+            "description": "Phase-arbitrated shadow candidate based on operational ablation; never used as the operational forecast.",
+            "distribution": phase_arbitrated.distribution.to_payload(),
+            "metadata": phase_arbitrated.details,
+        }
         feature_row["intraday_update"] = intraday.details
         feature_row["shadow_intraday_update"] = shadow_intraday.details
         feature_row["forecast_components"] = {
@@ -176,6 +189,13 @@ def predict_best_available(
                 "details": blended_shadow.details,
                 "final_model": blended_shadow.distribution.to_payload(),
                 "comparison_to_champion": _distribution_comparison(blended_shadow.distribution, dist),
+            },
+            "phase_arbitrated_shadow_mode": {
+                "name": "phase_arbitrated_shadow_v1",
+                "status": "shadow_only_does_not_affect_operational_forecast",
+                "details": phase_arbitrated.details,
+                "final_model": phase_arbitrated.distribution.to_payload(),
+                "comparison_to_champion": _distribution_comparison(phase_arbitrated.distribution, dist),
             },
         }
         if intraday.details.get("active"):
