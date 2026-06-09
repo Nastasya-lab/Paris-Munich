@@ -19,9 +19,17 @@ def resolve_job(service_name: str | None, explicit_job: str | None = None) -> st
         return explicit_job.strip().lower()
     normalized = (service_name or "").strip().lower()
     if "metar" in normalized and "cron" in normalized:
+        if "lfpb" in normalized or "paris" in normalized:
+            return "lfpb-metar-event"
         return "metar-event"
     if "forecast" in normalized and "cron" in normalized:
+        if "lfpb" in normalized or "paris" in normalized:
+            return "lfpb-forecast"
         return "forecast"
+    if "lfpb" in normalized and "metar" in normalized:
+        return "lfpb-metar-event"
+    if "lfpb" in normalized and "forecast" in normalized:
+        return "lfpb-forecast"
     if "outcome" in normalized and "cron" in normalized:
         return "outcome"
     if "daily" in normalized and "report" in normalized and "cron" in normalized:
@@ -32,6 +40,17 @@ def resolve_job(service_name: str | None, explicit_job: str | None = None) -> st
 
 
 def build_api_job_command(job: str) -> list[str]:
+    if job == "lfpb-forecast":
+        return [sys.executable, "scripts/53_lfpb_forecast_job.py"]
+    if job == "lfpb-metar-event":
+        return [
+            sys.executable,
+            "scripts/54_lfpb_metar_event_job.py",
+            "--poll-timeout-seconds",
+            os.getenv("METAR_POLL_TIMEOUT_SECONDS", "600"),
+            "--poll-interval-seconds",
+            os.getenv("METAR_POLL_INTERVAL_SECONDS", "30"),
+        ]
     command = [sys.executable, "scripts/33_call_api_job.py", job]
     if job == "metar-event":
         command.extend(
