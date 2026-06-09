@@ -6,6 +6,61 @@ Paris/LFPB runs independently from Munich/EDDM and predicts daily `METAR_Tmax`: 
 
 Use existing Railway service slots if the project service limit is tight.
 
+## Combined Mode With Existing Services
+
+If no new Railway services can be created, reuse the existing Munich cron services.
+
+`forecast-cron`:
+
+```text
+WEATHER_TMAX_JOB=forecast-all
+```
+
+Schedule:
+
+```text
+30 1,4,7,10,13,16,19,22 * * *
+```
+
+This runs Munich first, then Paris.
+
+`metar-cron`:
+
+```text
+WEATHER_TMAX_JOB=metar-event-all-once
+```
+
+Schedule:
+
+```text
+* * * * *
+```
+
+This performs one short METAR check for Munich and one short METAR check for Paris, then exits. It does not long-poll, so minute-by-minute cron runs do not stack for 10 minutes.
+
+Keep Munich variables as-is:
+
+```text
+TELEGRAM_BOT_TOKEN=<Munich bot token>
+TELEGRAM_CHAT_ID=<Munich chat id>
+MUNICH_API_BASE_URL=<API service URL>
+OPERATIONAL_API_KEY=<if configured>
+```
+
+Add Paris variables to the same two cron services:
+
+```text
+TELEGRAM_BOT_TOKEN_LFPB=<Paris bot token>
+TELEGRAM_CHAT_ID_LFPB=<Paris chat id>
+WEATHER_TMAX_ENABLE_TELEGRAM=1
+```
+
+The combined runner is fault-tolerant: it runs both city steps and reports separate return codes.
+
+## Dedicated Services
+
+If service slots are available, dedicated Paris service names are still supported.
+
 Recommended service names:
 
 - `lfpb-forecast-cron`
@@ -46,6 +101,8 @@ METAR event polling:
 ```text
 Start around :00 and :30 METAR publication windows, with polling every 30 seconds for up to 10 minutes.
 ```
+
+For combined mode, use `* * * * *` instead.
 
 Useful environment:
 

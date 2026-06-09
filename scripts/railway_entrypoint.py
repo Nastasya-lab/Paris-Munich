@@ -40,6 +40,10 @@ def resolve_job(service_name: str | None, explicit_job: str | None = None) -> st
 
 
 def build_api_job_command(job: str) -> list[str]:
+    if job == "forecast-all":
+        return [sys.executable, "scripts/55_multi_airport_job.py", "forecast-all"]
+    if job == "metar-event-all-once":
+        return [sys.executable, "scripts/55_multi_airport_job.py", "metar-event-all-once"]
     if job == "lfpb-forecast":
         return [sys.executable, "scripts/53_lfpb_forecast_job.py"]
     if job == "lfpb-metar-event":

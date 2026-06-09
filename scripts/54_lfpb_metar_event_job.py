@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -22,33 +21,26 @@ METAR_PATH = Path("data/forecasts/awc_metar_live_LFPB.parquet")
 def main() -> None:
     args = _parse_args()
     _activate_lfpb_telegram()
-    deadline = time.monotonic() + max(0, args.poll_timeout_seconds)
-    attempts = []
-    while True:
-        refresh = refresh_awc_live("LFPB")
-        latest = _latest_metar_time()
-        previous = _load_state().get("latest_metar_time_utc")
-        is_new = latest is not None and latest != previous
-        attempts.append({"latest_metar_time_utc": latest, "previous": previous, "is_new": is_new})
-        if is_new:
-            _save_state(latest)
-            _run_forecast(args)
-            print(json.dumps({"status": "new_metar_forecast", "latest_metar_time_utc": latest, "refresh": refresh}, indent=2))
-            return
-        if time.monotonic() >= deadline:
-            print(
-                json.dumps(
-                    {
-                        "status": "no_new_metar",
-                        "latest_metar_time_utc": latest,
-                        "attempts": attempts,
-                        "refresh": refresh,
-                    },
-                    indent=2,
-                )
-            )
-            return
-        time.sleep(max(5, args.poll_interval_seconds))
+    refresh = refresh_awc_live("LFPB")
+    latest = _latest_metar_time()
+    previous = _load_state().get("latest_metar_time_utc")
+    is_new = latest is not None and latest != previous
+    if is_new:
+        _save_state(latest)
+        _run_forecast(args)
+        print(json.dumps({"status": "new_metar_forecast", "latest_metar_time_utc": latest, "refresh": refresh}, indent=2))
+        return
+    print(
+        json.dumps(
+            {
+                "status": "no_new_metar",
+                "latest_metar_time_utc": latest,
+                "previous_metar_time_utc": previous,
+                "refresh": refresh,
+            },
+            indent=2,
+        )
+    )
 
 
 def _run_forecast(args: argparse.Namespace) -> None:
@@ -122,8 +114,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Poll for a new LFPB METAR and notify forecast on each new report.")
     parser.add_argument("--target-date", default=None)
     parser.add_argument("--issue-time", default="now")
-    parser.add_argument("--poll-timeout-seconds", type=int, default=600)
-    parser.add_argument("--poll-interval-seconds", type=int, default=30)
+    parser.add_argument("--poll-timeout-seconds", type=int, default=0, help="Ignored; kept for backward compatibility.")
+    parser.add_argument("--poll-interval-seconds", type=int, default=30, help="Ignored; kept for backward compatibility.")
     parser.add_argument("--log", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
