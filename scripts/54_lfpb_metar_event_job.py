@@ -26,8 +26,8 @@ def main() -> None:
     previous = _load_state().get("latest_metar_time_utc")
     is_new = latest is not None and latest != previous
     if is_new:
-        _save_state(latest)
         _run_forecast(args)
+        _save_state(latest)
         print(json.dumps({"status": "new_metar_forecast", "latest_metar_time_utc": latest, "refresh": refresh}, indent=2))
         return
     print(
