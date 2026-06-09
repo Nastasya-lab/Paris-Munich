@@ -13,6 +13,7 @@ from weather_tmax_bot.data.nwp import NWPArchive
 from weather_tmax_bot.data.open_meteo import fetch_open_meteo_live_extract
 from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_upside_features
 from weather_tmax_bot.features.nwp_features import build_nwp_features
+from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.operations.refresh import refresh_awc_live
 from weather_tmax_bot.utils.time import parse_issue_time, to_local_date
@@ -26,6 +27,7 @@ MODEL_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.joblib")
 METADATA_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.metadata.json")
 LIVE_NWP_PATH = Path("data/forecasts/open_meteo_archive_LFPB.parquet")
 HISTORICAL_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_icon_d2_LFPB.parquet")
+SURVIVAL_DATASET_PATH = Path("data/processed/metar_upside_dataset_LFPB_icon_d2.parquet")
 
 
 def main() -> None:
@@ -64,7 +66,13 @@ def main() -> None:
             "ICON-aware LFPB METAR Tmax model requires NWP features; "
             "run with --auto-refresh --refresh-nwp or provide an Open-Meteo archive."
         )
-    distribution = model.predict_distribution(feature_row)
+    base_distribution = model.predict_distribution(feature_row)
+    survival_adjustment = apply_metar_intraday_survival_layer(
+        base_distribution,
+        feature_row,
+        historical_dataset_path=SURVIVAL_DATASET_PATH,
+    )
+    distribution = survival_adjustment.distribution
     forecast_id = None
     if args.log:
         forecast_id = log_forecast(
@@ -77,6 +85,8 @@ def main() -> None:
                 "data_sources_used": ["awc.metar.live.LFPB", "iem.metar.archive.LFPB", feature_row.get("latest_nwp_source_id")],
                 "target": "METAR_Tmax",
                 "model_family": "metar_tmax_remaining_upside",
+                "intraday_survival_layer": survival_adjustment.details,
+                "base_forecast_before_intraday_survival": base_distribution.to_payload(),
             },
             model_version=metadata.get("model_version", "lfpb_metar_tmax_upside_v1"),
         )
@@ -92,6 +102,8 @@ def main() -> None:
         "calibration": (metadata.get("calibration_metadata") or {}).get("calibration_method", "unknown"),
         "calibration_attached": _calibration_attached(model),
         "forecast": distribution.to_payload(),
+        "base_forecast_before_intraday_survival": base_distribution.to_payload(),
+        "intraday_survival_layer": survival_adjustment.details,
         "metar_signal": {
             "latest_metar_time_utc": feature_row.get("latest_metar_time_utc"),
             "latest_metar_temp_c": feature_row.get("latest_metar_temp_c"),
@@ -206,6 +218,7 @@ def _calibration_attached(model) -> bool:
 def _format_message(payload: dict) -> str:
     forecast = payload["forecast"]
     signal = payload["metar_signal"]
+    survival = payload.get("intraday_survival_layer") or {}
     thresholds = forecast["threshold_probabilities"]
     bins = {
         int(bin_c): float(probability)
@@ -246,6 +259,14 @@ def _format_message(payload: dict) -> str:
             f"Тренд 3ч: {_fmt_float(signal.get('temp_trend_3h'))} °C",
             f"Дождь недавно: {'да' if signal.get('has_rain_recent_metar') else 'нет'}",
             "",
+            "<b>Intraday survival</b>",
+            f"Слой активен: {'да' if survival.get('active') else 'нет'}",
+            f"Шанс роста минимум на +1 °C: {_fmt_percent(survival.get('adjusted_probability_upside_ge_1c'))}",
+            f"Шанс роста минимум на +2 °C: {_fmt_percent(survival.get('adjusted_probability_upside_ge_2c'))}",
+            f"Шанс роста минимум на +3 °C: {_fmt_percent(survival.get('adjusted_probability_upside_ge_3c'))}",
+            f"До коррекции +1 °C: {_fmt_percent(survival.get('original_probability_upside_ge_1c'))}",
+            f"Вес коррекции: {_fmt_percent(survival.get('effective_strength'))}",
+            "",
             "<b>Калибровка</b>",
             f"Статус: {'включена' if payload.get('calibration_attached') else 'не включена'}",
             f"Метод: <code>{payload.get('calibration')}</code>",
@@ -266,6 +287,12 @@ def _fmt_float(value) -> str:
     if value is None or pd.isna(value):
         return "н/д"
     return f"{float(value):+.1f}"
+
+
+def _fmt_percent(value) -> str:
+    if value is None or pd.isna(value):
+        return "н/д"
+    return f"{float(value):.1%}"
 
 
 def _max_timestamp_string(*values) -> str | None:
