@@ -171,3 +171,29 @@ def test_daily_report_not_ready_is_not_logged(monkeypatch):
     )
 
     assert "daily_report" not in payload
+
+
+def test_legacy_metar_command_delegates_to_multi_airport_job(monkeypatch):
+    module = _load_job_module()
+    calls = []
+
+    def fake_run(command, check):
+        calls.append((command, check))
+
+    monkeypatch.setenv("WEATHER_TMAX_JOB", "metar-event-all-once")
+    monkeypatch.delenv("WEATHER_TMAX_MULTI_AIRPORT_CHILD", raising=False)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    delegated = module._delegate_multi_airport_job_if_requested(job="metar-event", issue_time="now")
+
+    assert delegated is True
+    assert calls == [([module.sys.executable, "scripts/55_multi_airport_job.py", "metar-event-all-once", "--issue-time", "now"], True)]
+
+
+def test_child_metar_command_does_not_delegate(monkeypatch):
+    module = _load_job_module()
+
+    monkeypatch.setenv("WEATHER_TMAX_JOB", "metar-event-all-once")
+    monkeypatch.setenv("WEATHER_TMAX_MULTI_AIRPORT_CHILD", "1")
+
+    assert module._delegate_multi_airport_job_if_requested(job="metar-event", issue_time="now") is False

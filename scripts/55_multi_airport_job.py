@@ -87,7 +87,7 @@ def _run_step(label: str, command: list[str]) -> dict:
             check=False,
             text=True,
             capture_output=True,
-            env=env,
+            env={**env, "WEATHER_TMAX_MULTI_AIRPORT_CHILD": "1"},
         )
         if completed.stdout:
             print(f"\n===== {label} stdout =====\n{completed.stdout}")

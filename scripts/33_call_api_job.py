@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -20,6 +22,8 @@ def main(
     poll_timeout_seconds: int = typer.Option(0, help="For metar-event, keep polling until a new METAR appears."),
     poll_interval_seconds: int = typer.Option(30, help="For metar-event polling, seconds between checks."),
 ):
+    if _delegate_multi_airport_job_if_requested(job=job, issue_time=issue_time):
+        return
     base = (base_url or os.getenv("MUNICH_API_BASE_URL") or "").rstrip("/")
     if not base:
         raise typer.BadParameter("Set --base-url or MUNICH_API_BASE_URL")
@@ -110,6 +114,22 @@ def main(
         raise typer.BadParameter("job must be forecast, metar-event, outcome, daily-report, or health")
     response.raise_for_status()
     print(json.dumps(_compact_job_result(job, response.json()), indent=2, default=str))
+
+
+def _delegate_multi_airport_job_if_requested(*, job: str, issue_time: str) -> bool:
+    """Honor Railway job variables even when an old Start Command is configured."""
+    if os.getenv("WEATHER_TMAX_MULTI_AIRPORT_CHILD"):
+        return False
+    requested = os.getenv("WEATHER_TMAX_JOB", "").strip().lower()
+    legacy_to_multi = {
+        "forecast": "forecast-all",
+        "metar-event": "metar-event-all-once",
+    }
+    target = legacy_to_multi.get(job)
+    if not target or requested != target:
+        return False
+    subprocess.run([sys.executable, "scripts/55_multi_airport_job.py", target, "--issue-time", issue_time], check=True)
+    return True
 
 
 def _attach_daily_report_if_enabled(
