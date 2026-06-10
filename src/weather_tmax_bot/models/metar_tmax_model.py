@@ -392,14 +392,14 @@ def _survival_matrix_to_probabilities(survival: np.ndarray) -> np.ndarray:
 
 
 def _numeric_feature_frame(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-    out = pd.DataFrame(index=frame.index)
+    data = {}
     for column in columns:
         values = frame[column] if column in frame.columns else pd.Series(np.nan, index=frame.index)
         if values.dtype == bool:
-            out[column] = values.astype(float)
+            data[column] = values.astype(float)
         else:
-            out[column] = pd.to_numeric(values, errors="coerce")
-    return out
+            data[column] = pd.to_numeric(values, errors="coerce")
+    return pd.DataFrame(data, index=frame.index)
 
 
 def _required_float(row: dict | pd.Series, key: str) -> float:

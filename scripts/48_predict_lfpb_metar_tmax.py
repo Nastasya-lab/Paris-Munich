@@ -14,6 +14,7 @@ from weather_tmax_bot.data.open_meteo import fetch_open_meteo_live_extract
 from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_upside_features
 from weather_tmax_bot.features.nwp_features import build_nwp_features
 from weather_tmax_bot.features.spatial_metar import DEFAULT_SPATIAL_STATIONS, build_spatial_metar_features
+from weather_tmax_bot.features.wind_advection import DEFAULT_ADVECTION_STATIONS, build_wind_advection_features
 from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.operations.refresh import refresh_awc_live
@@ -29,8 +30,8 @@ METADATA_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.metadata.json")
 LIVE_NWP_PATH = Path("data/forecasts/open_meteo_archive_LFPB.parquet")
 HISTORICAL_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_icon_d2_LFPB.parquet")
 SURVIVAL_DATASET_PATH = Path("data/processed/metar_upside_dataset_LFPB_icon_d2.parquet")
-SPATIAL_CANDIDATE_MODEL_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_candidate_v1.joblib")
-SPATIAL_CANDIDATE_METADATA_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_candidate_v1.metadata.json")
+SPATIAL_CANDIDATE_MODEL_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.joblib")
+SPATIAL_CANDIDATE_METADATA_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json")
 SPATIAL_CANDIDATE_LOCAL_HOUR_START = 12
 SPATIAL_CANDIDATE_LOCAL_HOUR_END = 18
 
@@ -229,9 +230,20 @@ def _predict_spatial_candidate(
             timezone_name=TIMEZONE,
             stations=DEFAULT_SPATIAL_STATIONS,
         )
-        spatial_row = {**base_feature_row, **spatial_features}
+        station_metars = {"LFPB": _load_metar("LFPB"), **neighbor_metars}
+        advection_features = build_wind_advection_features(
+            station_metars,
+            target_date_local=target_date,
+            issue_time_utc=issue_time_utc,
+            timezone_name=TIMEZONE,
+            stations=DEFAULT_ADVECTION_STATIONS,
+        )
+        spatial_row = {**base_feature_row, **spatial_features, **advection_features}
         if not spatial_features.get("spatial_leakage_check_passed", False):
             base["reason"] = "spatial_leakage_check_failed"
+            return base
+        if not advection_features.get("adv_leakage_check_passed", False):
+            base["reason"] = "wind_advection_leakage_check_failed"
             return base
         if int(spatial_features.get("spatial_available_station_count") or 0) <= 0:
             base["reason"] = "no_spatial_neighbor_metar_available_as_of_issue_time"
@@ -249,8 +261,8 @@ def _predict_spatial_candidate(
         return {
             **base,
             "active": True,
-            "reason": "active_midday_spatial_metar_candidate",
-            "model_version": metadata.get("model_version", getattr(model, "model_version", "spatial_candidate")),
+            "reason": "active_midday_spatial_wind_advection_candidate",
+            "model_version": metadata.get("model_version", getattr(model, "model_version", "spatial_wind_advection_candidate")),
             "forecast": final_distribution.to_payload(),
             "forecast_before_intraday_survival": raw_distribution.to_payload(),
             "intraday_survival_layer": survival_adjustment.details,
@@ -265,6 +277,34 @@ def _predict_spatial_candidate(
                 "any_neighbor_above_lfpb_latest": spatial_features.get("spatial_any_neighbor_above_lfpb_latest"),
                 "any_neighbor_above_lfpb_current_max": spatial_features.get("spatial_any_neighbor_above_lfpb_current_max"),
                 "max_feature_knowledge_time_utc": spatial_features.get("spatial_max_feature_knowledge_time_utc"),
+            },
+            "wind_advection_features": {
+                "available_station_count": advection_features.get("adv_available_station_count"),
+                "mean_wind_speed_latest_kt": advection_features.get("adv_mean_wind_speed_latest_kt"),
+                "mean_temp_trend_1h": advection_features.get("adv_mean_temp_trend_1h"),
+                "mean_temp_trend_3h": advection_features.get("adv_mean_temp_trend_3h"),
+                "mean_dewpoint_trend_3h": advection_features.get("adv_mean_dewpoint_trend_3h"),
+                "mean_pressure_tendency_3h": advection_features.get("adv_mean_pressure_tendency_3h"),
+                "any_north_sector": advection_features.get("adv_any_north_sector"),
+                "any_south_sector": advection_features.get("adv_any_south_sector"),
+                "any_cold_advection_signal": advection_features.get("adv_any_cold_advection_signal"),
+                "any_warm_advection_signal": advection_features.get("adv_any_warm_advection_signal"),
+                "any_frontal_passage_signal": advection_features.get("adv_any_frontal_passage_signal"),
+                "max_feature_knowledge_time_utc": advection_features.get("adv_max_feature_knowledge_time_utc"),
+            },
+            "advection_stations": {
+                station: {
+                    "available": advection_features.get(f"adv_{station.lower()}_available"),
+                    "wind_dir_latest_deg": advection_features.get(f"adv_{station.lower()}_wind_dir_latest_deg"),
+                    "wind_speed_latest_kt": advection_features.get(f"adv_{station.lower()}_wind_speed_latest_kt"),
+                    "temp_trend_1h": advection_features.get(f"adv_{station.lower()}_temp_trend_1h"),
+                    "dewpoint_trend_3h": advection_features.get(f"adv_{station.lower()}_dewpoint_trend_3h"),
+                    "pressure_tendency_3h": advection_features.get(f"adv_{station.lower()}_pressure_tendency_3h"),
+                    "cold_advection_signal": advection_features.get(f"adv_{station.lower()}_cold_advection_signal"),
+                    "warm_advection_signal": advection_features.get(f"adv_{station.lower()}_warm_advection_signal"),
+                    "frontal_passage_signal": advection_features.get(f"adv_{station.lower()}_frontal_passage_signal"),
+                }
+                for station in DEFAULT_ADVECTION_STATIONS
             },
             "neighbor_stations": {
                 station: {
@@ -439,7 +479,7 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
         if reason == "outside_spatial_candidate_local_hour_window":
             return []
         return [
-            "<b>Spatial candidate LFPG/LFPO</b>",
+            "<b>Spatial + wind/advection candidate</b>",
             "Кандидат не влияет на основной прогноз.",
             f"Статус: не активен ({reason or 'причина неизвестна'})",
             "",
@@ -447,7 +487,9 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
     forecast = candidate.get("forecast") or {}
     thresholds = forecast.get("threshold_probabilities") or {}
     spatial = candidate.get("spatial_features") or {}
+    advection = candidate.get("wind_advection_features") or {}
     neighbors = candidate.get("neighbor_stations") or {}
+    advection_stations = candidate.get("advection_stations") or {}
     delta = candidate.get("expected_delta_vs_production_c")
     neighbor_lines = []
     for station, info in neighbors.items():
@@ -459,9 +501,28 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
             f"max {_fmt_signed_plain(info.get('current_max_c'))} °C, "
             f"возраст {_fmt_plain(info.get('age_minutes'))} мин"
         )
+    advection_lines = []
+    for station, info in advection_stations.items():
+        if not info.get("available"):
+            advection_lines.append(f"{station}: wind/advection н/д")
+            continue
+        signals = []
+        if info.get("cold_advection_signal"):
+            signals.append("cold")
+        if info.get("warm_advection_signal"):
+            signals.append("warm")
+        if info.get("frontal_passage_signal"):
+            signals.append("front")
+        signal_text = ", ".join(signals) if signals else "neutral"
+        advection_lines.append(
+            f"{station}: ветер {_fmt_plain(info.get('wind_dir_latest_deg'))}°/{_fmt_plain(info.get('wind_speed_latest_kt'))} kt, "
+            f"T1h {_fmt_signed_plain(info.get('temp_trend_1h'))} °C, "
+            f"Td3h {_fmt_signed_plain(info.get('dewpoint_trend_3h'))} °C, "
+            f"QNH3h {_fmt_signed_plain(info.get('pressure_tendency_3h'))} hPa, {signal_text}"
+        )
     return [
-        "<b>Spatial candidate LFPG/LFPO</b>",
-        "Параллельный кандидат, не влияет на основной прогноз. Активен только 12:00-18:00 по Парижу.",
+        "<b>Spatial + wind/advection candidate</b>",
+        "Заменяет прежний spatial-кандидат LFPG/LFPO. Не влияет на основной прогноз. Активен только 12:00-18:00 по Парижу.",
         f"Ожидаемый METAR Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} °C</b> ({_fmt_delta(delta)} к production)",
         f"Медиана: {float(forecast.get('median_tmax_c', 0.0)):.1f} °C",
         f"Самая вероятная корзина: <b>{forecast.get('most_likely_integer_c')} °C</b>",
@@ -471,7 +532,14 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
         f"Соседних станций доступно: {int(spatial.get('available_station_count') or 0)}",
         f"Средняя текущая температура соседей: {_fmt_signed_plain(spatial.get('latest_temp_mean_c'))} °C",
         f"Средний максимум соседей: {_fmt_signed_plain(spatial.get('current_max_mean_c'))} °C",
+        f"Advection stations: {int(advection.get('available_station_count') or 0)}",
+        f"Средний ветер: {_fmt_plain(advection.get('mean_wind_speed_latest_kt'))} kt",
+        f"Средний тренд T 1ч/3ч: {_fmt_signed_plain(advection.get('mean_temp_trend_1h'))}/{_fmt_signed_plain(advection.get('mean_temp_trend_3h'))} °C",
+        f"Средний тренд Td 3ч: {_fmt_signed_plain(advection.get('mean_dewpoint_trend_3h'))} °C",
+        f"Средний тренд QNH 3ч: {_fmt_signed_plain(advection.get('mean_pressure_tendency_3h'))} hPa",
+        f"Сигналы cold/warm/front: {'да' if advection.get('any_cold_advection_signal') else 'нет'}/{'да' if advection.get('any_warm_advection_signal') else 'нет'}/{'да' if advection.get('any_frontal_passage_signal') else 'нет'}",
         *(neighbor_lines or ["Соседи: нет данных"]),
+        *(advection_lines or ["Wind/advection: нет данных"]),
         "",
     ]
 

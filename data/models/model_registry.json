@@ -111,6 +111,26 @@
         "brier_upside_ge_3c": 0.04893768459264796,
         "coverage_80": 0.9610655737704918
       }
+    },
+    {
+      "version": "lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.joblib",
+      "metadata_path": "data\\models\\lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json",
+      "metrics": {
+        "model_variant": "spatial_wind_advection_icon_d2",
+        "rows": 488,
+        "distinct_days": 61,
+        "mae_expected": 0.5789170299307418,
+        "rmse_expected": 0.8420622251961081,
+        "bias_expected": 0.20216586801857184,
+        "mean_nll": 1.0690912172253626,
+        "mean_crps": 0.026931084516577136,
+        "brier_upside_ge_1c": 0.04486526584917192,
+        "brier_upside_ge_2c": 0.04231925645230353,
+        "brier_upside_ge_3c": 0.04869286338738586,
+        "coverage_80": 0.9692622950819673
+      }
     }
   ],
   "promotion": {

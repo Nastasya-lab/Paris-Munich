@@ -1,0 +1,2 @@
+model_variant,rows,distinct_days,mae_expected,rmse_expected,bias_expected,mean_nll,mean_crps,brier_upside_ge_1c,brier_upside_ge_2c,brier_upside_ge_3c,coverage_80
+spatial_wind_advection_icon_d2,488,61,0.5789170299307418,0.8420622251961081,0.20216586801857184,1.0690912172253626,0.026931084516577136,0.04486526584917192,0.04231925645230353,0.04869286338738586,0.9692622950819673
