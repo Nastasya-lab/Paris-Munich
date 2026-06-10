@@ -63,6 +63,18 @@ def apply_metar_intraday_survival_layer(
         original = float(np.clip(original_survival.get(threshold, 0.0), 0.0, 1.0))
         cap = float(np.clip(target_caps.get(threshold, 1.0), 0.0, 1.0))
         adjusted_survival[threshold] = original - dynamic_strength * max(0.0, original - cap)
+    rebound_guard = _convective_rebound_guard(
+        feature_row,
+        original_survival=original_survival,
+        adjusted_survival=adjusted_survival,
+        max_threshold_c=max_upside,
+    )
+    if rebound_guard["active"]:
+        for threshold, floor in rebound_guard["floors"].items():
+            threshold = int(threshold)
+            if threshold <= max_upside:
+                adjusted_survival[threshold] = max(float(adjusted_survival.get(threshold, 0.0)), float(floor))
+
     adjusted_values = np.minimum.accumulate(
         np.clip([adjusted_survival[threshold] for threshold in range(1, max_upside + 1)], 0.0, 1.0)
     )
@@ -72,7 +84,7 @@ def apply_metar_intraday_survival_layer(
     adjusted = _survival_to_distribution(adjusted_survival, observed_bin, max_upside)
     details = {
         "active": True,
-        "layer_version": "lfpb_metar_intraday_survival_v1",
+        "layer_version": "lfpb_metar_intraday_survival_v2_rebound_guard",
         "observed_max_bin_c": observed_bin,
         "observed_max_so_far_c": float(observed_max),
         "local_issue_hour": _optional_float(feature_row, "local_issue_hour"),
@@ -93,6 +105,7 @@ def apply_metar_intraday_survival_layer(
         "historical_survival_priors": {str(k): float(v) for k, v in priors.items() if k <= 3},
         "context_survival_caps": {str(k): float(v) for k, v in context_caps.items() if k <= 3},
         "target_survival_caps": {str(k): float(v) for k, v in target_caps.items() if k <= 3},
+        "rebound_guard": rebound_guard,
         "formula": "survival_cap_blend_from_historical_hourly_prior_and_live_context",
     }
     return MetarIntradaySurvivalAdjustment(distribution=adjusted, active=True, details=details)
@@ -207,6 +220,108 @@ def _phase_strength(feature_row: dict | pd.Series) -> float:
     if hour < 18:
         return 0.80
     return 0.95
+
+
+def _convective_rebound_guard(
+    feature_row: dict | pd.Series,
+    *,
+    original_survival: dict[int, float],
+    adjusted_survival: dict[int, float],
+    max_threshold_c: int,
+) -> dict:
+    """Keep midday convective rebounds from being mistaken for a finished day.
+
+    The normal intraday layer is intentionally conservative after rain/CB/TCU.
+    That is good late in the day, but around early afternoon a shower can create
+    a temporary temperature dip followed by a fast rebound. In that narrow case
+    we apply a floor to +1C/+2C upside probabilities instead of fully trusting
+    the shutdown cap.
+    """
+    local_hour = _optional_float(feature_row, "local_issue_hour")
+    if local_hour is None or not (11.5 <= local_hour <= 15.5):
+        return _inactive_rebound_guard("outside_midday_rebound_window")
+
+    current_max = _optional_float(feature_row, "current_metar_max_c")
+    latest_temp = _optional_float(feature_row, "latest_metar_temp_c")
+    if current_max is None or latest_temp is None:
+        return _inactive_rebound_guard("missing_current_or_latest_temperature")
+
+    trend_1h = _optional_float(feature_row, "temp_trend_1h")
+    trend_last_2 = _optional_float(feature_row, "temp_trend_last_2_metars")
+    trend_3h = _optional_float(feature_row, "temp_trend_3h")
+    minutes_since_max = _optional_float(feature_row, "metar_minutes_since_current_max")
+    future_delta = _optional_float(feature_row, "nwp_future_minus_current_max_c")
+    if future_delta is None:
+        model_future = _optional_float(feature_row, "model_future_temp_max_c")
+        future_delta = None if model_future is None else model_future - current_max
+
+    convective_signal = any(
+        bool(feature_row.get(key, False))
+        for key in [
+            "has_rain_recent_metar",
+            "rain_started_after_current_max",
+            "cb_tcu_appeared_after_current_max",
+            "showers_appeared_after_current_max",
+        ]
+    )
+    strong_rebound = max(
+        trend_1h if trend_1h is not None else -99.0,
+        trend_last_2 if trend_last_2 is not None else -99.0,
+    )
+    near_current_max = latest_temp >= current_max - 0.35
+    recent_or_new_max = minutes_since_max is None or minutes_since_max <= 45.0
+
+    if not convective_signal:
+        return _inactive_rebound_guard("no_convective_or_rain_signal")
+    if strong_rebound < 2.0:
+        return _inactive_rebound_guard("no_strong_temperature_rebound")
+    if not near_current_max:
+        return _inactive_rebound_guard("latest_temperature_not_back_near_current_max")
+    if not recent_or_new_max:
+        return _inactive_rebound_guard("current_max_not_recent")
+
+    floor_1c = 0.34
+    if strong_rebound >= 3.0:
+        floor_1c += 0.08
+    if local_hour < 14.5:
+        floor_1c += 0.04
+    if trend_3h is not None and trend_3h >= 1.5:
+        floor_1c += 0.04
+    if future_delta is not None:
+        if future_delta < -1.0:
+            floor_1c -= 0.12
+        elif future_delta < -0.25:
+            floor_1c -= 0.05
+        elif future_delta > 0.5:
+            floor_1c += 0.05
+    floor_1c = float(np.clip(floor_1c, 0.24, 0.55))
+
+    # Keep +2C possible but modest: the guard is a rebound safety net, not a
+    # heat-spike booster.
+    floor_2c = float(np.clip(floor_1c * 0.18, 0.03, 0.12))
+    floors = {1: floor_1c}
+    if max_threshold_c >= 2:
+        floors[2] = min(floor_2c, floor_1c)
+
+    changed = any(float(adjusted_survival.get(threshold, 0.0)) < floor for threshold, floor in floors.items())
+    return {
+        "active": bool(changed),
+        "eligible": True,
+        "reason": "convective_temporary_dip_rebound_guard",
+        "floors": {str(key): float(value) for key, value in floors.items()},
+        "strong_rebound_c": float(strong_rebound),
+        "trend_1h_c": None if trend_1h is None else float(trend_1h),
+        "trend_last_2_metars_c": None if trend_last_2 is None else float(trend_last_2),
+        "trend_3h_c": None if trend_3h is None else float(trend_3h),
+        "minutes_since_current_max": None if minutes_since_max is None else float(minutes_since_max),
+        "nwp_future_minus_current_max_c": None if future_delta is None else float(future_delta),
+        "original_probability_upside_ge_1c": float(original_survival.get(1, 0.0)),
+        "pre_guard_adjusted_probability_upside_ge_1c": float(adjusted_survival.get(1, 0.0)),
+    }
+
+
+def _inactive_rebound_guard(reason: str) -> dict:
+    return {"active": False, "eligible": False, "reason": reason, "floors": {}}
 
 
 def _distribution_to_survival(distribution: TmaxDistribution, observed_bin: int, max_upside: int) -> dict[int, float]:

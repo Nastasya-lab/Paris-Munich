@@ -446,6 +446,7 @@ def _format_message(payload: dict) -> str:
             f"Шанс роста минимум на +3 °C: {_fmt_percent(survival.get('adjusted_probability_upside_ge_3c'))}",
             f"До коррекции +1 °C: {_fmt_percent(survival.get('original_probability_upside_ge_1c'))}",
             f"Вес коррекции: {_fmt_percent(survival.get('effective_strength'))}",
+            *_format_rebound_guard_lines(survival),
             "",
             *_format_spatial_candidate_lines(payload),
             "<b>Калибровка</b>",
@@ -468,6 +469,21 @@ def _fmt_float(value) -> str:
     if value is None or pd.isna(value):
         return "н/д"
     return f"{float(value):+.1f}"
+
+
+def _format_rebound_guard_lines(survival: dict) -> list[str]:
+    guard = (survival or {}).get("rebound_guard") or {}
+    if not guard:
+        return []
+    if not guard.get("active"):
+        return []
+    floors = guard.get("floors") or {}
+    floor_1c = floors.get("1")
+    return [
+        "Rebound guard: <b>active</b>",
+        f"Rebound signal: +{float(guard.get('strong_rebound_c', 0.0)):.1f} °C",
+        f"Minimum P(+1 °C): {_fmt_percent(floor_1c)}",
+    ]
 
 
 def _format_spatial_candidate_lines(payload: dict) -> list[str]:

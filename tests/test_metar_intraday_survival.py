@@ -53,6 +53,61 @@ def test_morning_heating_window_keeps_survival_layer_weak() -> None:
     assert result.distribution.threshold_ge(16) > 0.85
 
 
+def test_midday_convective_rebound_guard_preserves_next_degree_upside() -> None:
+    base = TmaxDistribution([18, 19, 20, 21], [0.47, 0.51, 0.015, 0.005])
+    history = _history()
+    feature_row = {
+        "target_date_local": "2026-06-10",
+        "local_issue_hour": 14.5,
+        "current_metar_max_c": 18.0,
+        "latest_metar_temp_c": 18.0,
+        "drop_from_current_max_c": 0.0,
+        "temp_trend_1h": 3.0,
+        "temp_trend_3h": 2.0,
+        "temp_trend_last_2_metars": 3.0,
+        "metar_minutes_since_current_max": 5.0,
+        "has_rain_recent_metar": True,
+        "rain_started_after_current_max": True,
+        "cb_tcu_appeared_after_current_max": True,
+        "showers_appeared_after_current_max": True,
+        "nwp_future_minus_current_max_c": -0.3,
+        "model_future_temp_max_c": 17.7,
+    }
+
+    result = apply_metar_intraday_survival_layer(base, feature_row, historical_dataset=history)
+
+    assert result.details["rebound_guard"]["active"] is True
+    assert result.details["adjusted_probability_upside_ge_1c"] >= 0.37
+    assert result.distribution.threshold_ge(19) >= 0.37
+
+
+def test_midday_drop_without_rebound_does_not_activate_rebound_guard() -> None:
+    base = TmaxDistribution([17, 18, 19, 20], [0.45, 0.38, 0.16, 0.01])
+    history = _history()
+    feature_row = {
+        "target_date_local": "2026-06-10",
+        "local_issue_hour": 14.0,
+        "current_metar_max_c": 17.0,
+        "latest_metar_temp_c": 15.0,
+        "drop_from_current_max_c": 2.0,
+        "temp_trend_1h": -2.0,
+        "temp_trend_3h": -1.0,
+        "temp_trend_last_2_metars": -2.0,
+        "metar_minutes_since_current_max": 96.0,
+        "has_rain_recent_metar": False,
+        "rain_started_after_current_max": True,
+        "cb_tcu_appeared_after_current_max": True,
+        "showers_appeared_after_current_max": True,
+        "nwp_future_minus_current_max_c": 0.7,
+        "model_future_temp_max_c": 17.7,
+    }
+
+    result = apply_metar_intraday_survival_layer(base, feature_row, historical_dataset=history)
+
+    assert result.details["rebound_guard"]["active"] is False
+    assert result.details["rebound_guard"]["reason"] == "no_strong_temperature_rebound"
+
+
 def _history() -> pd.DataFrame:
     rows = []
     for day in range(1, 41):
