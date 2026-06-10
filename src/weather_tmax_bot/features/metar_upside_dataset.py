@@ -55,6 +55,8 @@ def build_metar_remaining_upside_dataset(
                 continue
             latest = so_far.iloc[-1]
             current_max = float(so_far["temperature_c"].max())
+            current_max_idx = so_far["temperature_c"].idxmax()
+            after_current_max = so_far.loc[so_far.index >= current_max_idx].copy()
             final_max = float(target_row["metar_tmax_c"])
             upside = max(0.0, final_max - current_max)
             row = {
@@ -80,6 +82,7 @@ def build_metar_remaining_upside_dataset(
                 "has_rain_recent_metar": _has_weather(_window(so_far, issue_utc, 3), ["RA", "SHRA", "TSRA"]),
                 "has_thunder_recent_metar": _has_weather(_window(so_far, issue_utc, 6), ["TS"]),
                 "is_cavok_latest": bool(latest.get("cavok", False)),
+                **_enhanced_metar_features(so_far, after_current_max, latest, issue_utc, day_start),
                 "latest_metar_time_utc": latest["observation_time_utc"].isoformat(),
                 "max_feature_knowledge_time_utc": so_far["knowledge_time_utc"].max().isoformat(),
                 "leakage_check_passed": bool(so_far["knowledge_time_utc"].max() <= issue_utc),
@@ -113,6 +116,8 @@ def build_current_metar_upside_features(
         raise ValueError(f"No METAR observations available for {airport_icao} on {target_date_local} as of {issue_utc.isoformat()}")
     latest = day_metar.iloc[-1]
     current_max = float(day_metar["temperature_c"].max())
+    current_max_idx = day_metar["temperature_c"].idxmax()
+    after_current_max = day_metar.loc[day_metar.index >= current_max_idx].copy()
     tz = ZoneInfo(timezone_name)
     issue_local = issue_utc.tz_convert(tz)
     row = {
@@ -133,6 +138,7 @@ def build_current_metar_upside_features(
         "has_rain_recent_metar": _has_weather(_window(day_metar, issue_utc, 3), ["RA", "SHRA", "TSRA"]),
         "has_thunder_recent_metar": _has_weather(_window(day_metar, issue_utc, 6), ["TS"]),
         "is_cavok_latest": bool(latest.get("cavok", False)),
+        **_enhanced_metar_features(day_metar, after_current_max, latest, issue_utc, day_start),
         "latest_metar_time_utc": latest["observation_time_utc"].isoformat(),
         "latest_metar_raw": latest.get("raw_metar"),
         "max_feature_knowledge_time_utc": day_metar["knowledge_time_utc"].max().isoformat(),
@@ -147,6 +153,9 @@ def _prepare_metar(metar: pd.DataFrame) -> pd.DataFrame:
     df["observation_time_utc"] = pd.to_datetime(df["observation_time_utc"], utc=True, errors="coerce")
     df["knowledge_time_utc"] = pd.to_datetime(df.get("knowledge_time_utc", df["observation_time_utc"]), utc=True, errors="coerce")
     df["temperature_c"] = pd.to_numeric(df["temperature_c"], errors="coerce")
+    for column in ["dewpoint_c", "qnh_hpa", "wind_direction_deg", "wind_speed_kt", "ceiling_ft"]:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
     return df.dropna(subset=["observation_time_utc", "knowledge_time_utc", "temperature_c"]).sort_values("observation_time_utc")
 
 
@@ -170,9 +179,111 @@ def _trend(df: pd.DataFrame, column: str) -> float:
     return float(values.iloc[-1] - values.iloc[0])
 
 
+def _enhanced_metar_features(
+    so_far: pd.DataFrame,
+    after_current_max: pd.DataFrame,
+    latest: pd.Series,
+    issue_utc: pd.Timestamp,
+    day_start_utc: datetime,
+) -> dict:
+    last_2 = so_far.tail(2)
+    day_since_sunrise = so_far[so_far["observation_time_utc"] >= pd.Timestamp(day_start_utc) + pd.Timedelta(hours=5)]
+    cloud_proxy = so_far.apply(_cloud_cover_proxy, axis=1)
+    ceiling = pd.to_numeric(so_far.get("ceiling_ft"), errors="coerce")
+    dewpoint_depression = pd.to_numeric(so_far["temperature_c"], errors="coerce") - pd.to_numeric(so_far.get("dewpoint_c"), errors="coerce")
+    wind_direction = pd.to_numeric(so_far.get("wind_direction_deg"), errors="coerce")
+    return {
+        "temp_slope_since_sunrise": _trend(day_since_sunrise, "temperature_c"),
+        "temp_trend_last_2_metars": _trend(last_2, "temperature_c"),
+        "latest_2_metar_temp_change_c": _trend(last_2, "temperature_c"),
+        "cloud_cover_proxy_latest": float(_cloud_cover_proxy(latest)),
+        "cloud_cover_proxy_trend_last_2_metars": _series_trend(cloud_proxy.tail(2)),
+        "cloud_cover_proxy_trend_2h": _series_trend(cloud_proxy.loc[_window(so_far, issue_utc, 2).index]),
+        "lowest_ceiling_ft_latest": _finite_or_nan(latest.get("ceiling_ft")),
+        "ceiling_trend_last_2_metars": _series_trend(ceiling.tail(2)),
+        "ceiling_trend_2h": _series_trend(ceiling.loc[_window(so_far, issue_utc, 2).index]),
+        "dewpoint_depression_latest": _finite_or_nan(float(latest["temperature_c"]) - _finite_or_nan(latest.get("dewpoint_c"))),
+        "dewpoint_depression_trend_2h": _series_trend(dewpoint_depression.loc[_window(so_far, issue_utc, 2).index]),
+        "pressure_tendency_1h": _trend(_window(so_far, issue_utc, 1), "qnh_hpa"),
+        "pressure_tendency_3h": _trend(_window(so_far, issue_utc, 3), "qnh_hpa"),
+        "wind_dir_shift_2h_deg": _wind_shift(_window(so_far, issue_utc, 2)),
+        "wind_speed_trend_2h": _trend(_window(so_far, issue_utc, 2), "wind_speed_kt"),
+        "wind_direction_latest_deg": _finite_or_nan(latest.get("wind_direction_deg")),
+        "wind_speed_latest_kt": _finite_or_nan(latest.get("wind_speed_kt")),
+        "rain_started_after_current_max": _has_weather(after_current_max, ["RA", "SHRA", "TSRA"]),
+        "cb_tcu_appeared_after_current_max": _has_weather(after_current_max, [" CB", "CB", "TCU"]),
+        "showers_appeared_after_current_max": _has_weather(after_current_max, ["SHRA", "SH", "VCSH"]),
+        "fog_or_br_recent_metar": _has_weather(_window(so_far, issue_utc, 3), ["FG", "BR"]),
+        "cavok_trend_last_2_metars": _series_trend(last_2.get("cavok", pd.Series(dtype=float)).astype(float)),
+        "metar_minutes_since_current_max": _minutes_since_current_max(so_far, issue_utc),
+        "metar_hours_since_sunrise": max(0.0, (issue_utc - (pd.Timestamp(day_start_utc) + pd.Timedelta(hours=5))).total_seconds() / 3600.0),
+        "temp_drop_after_rain_start_c": _temp_drop_after_weather(so_far, issue_utc, ["RA", "SHRA", "TSRA"]),
+        "temp_drop_after_cb_tcu_c": _temp_drop_after_weather(so_far, issue_utc, [" CB", "CB", "TCU"]),
+        "wind_direction_valid_count_2h": int(wind_direction.loc[_window(so_far, issue_utc, 2).index].dropna().shape[0]),
+    }
+
+
 def _has_weather(df: pd.DataFrame, codes: list[str]) -> bool:
     text = " ".join(df.get("raw_metar", pd.Series(dtype=str)).fillna("").astype(str).tolist())
     return any(code in text for code in codes)
+
+
+def _series_trend(values: pd.Series) -> float:
+    clean = pd.to_numeric(values, errors="coerce").dropna()
+    if len(clean) < 2:
+        return float("nan")
+    return float(clean.iloc[-1] - clean.iloc[0])
+
+
+def _cloud_cover_proxy(row: pd.Series) -> float:
+    if bool(row.get("cavok", False)):
+        return 0.0
+    text = " ".join(str(row.get(column, "") or "") for column in ["cloud_layers", "raw_metar"])
+    if "OVC" in text:
+        return 8.0
+    if "BKN" in text:
+        return 6.0
+    if "SCT" in text:
+        return 4.0
+    if "FEW" in text:
+        return 2.0
+    if "NSC" in text or "SKC" in text or "CLR" in text:
+        return 0.0
+    return float("nan")
+
+
+def _wind_shift(df: pd.DataFrame) -> float:
+    values = pd.to_numeric(df.get("wind_direction_deg"), errors="coerce").dropna().to_numpy(dtype=float)
+    if len(values) < 2:
+        return float("nan")
+    diff = abs(values[-1] - values[0]) % 360
+    return float(min(diff, 360 - diff))
+
+
+def _minutes_since_current_max(so_far: pd.DataFrame, issue_utc: pd.Timestamp) -> float:
+    if so_far.empty:
+        return float("nan")
+    idx = so_far["temperature_c"].idxmax()
+    max_time = pd.Timestamp(so_far.loc[idx, "observation_time_utc"])
+    return float((issue_utc - max_time).total_seconds() / 60.0)
+
+
+def _temp_drop_after_weather(so_far: pd.DataFrame, issue_utc: pd.Timestamp, codes: list[str]) -> float:
+    if so_far.empty:
+        return 0.0
+    mask = so_far.get("raw_metar", pd.Series("", index=so_far.index)).fillna("").astype(str).apply(lambda text: any(code in text for code in codes))
+    if not mask.any():
+        return 0.0
+    first_weather = so_far.loc[mask, "observation_time_utc"].min()
+    after = so_far[(so_far["observation_time_utc"] >= first_weather) & (so_far["observation_time_utc"] <= issue_utc)]
+    if after.empty:
+        return 0.0
+    return float(pd.to_numeric(after["temperature_c"], errors="coerce").max() - pd.to_numeric(after["temperature_c"], errors="coerce").iloc[-1])
+
+
+def _finite_or_nan(value) -> float:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return float(numeric) if pd.notna(numeric) else float("nan")
 
 
 def _rain_features(rain: pd.DataFrame, day_start_utc: datetime, issue_utc: pd.Timestamp) -> dict:
