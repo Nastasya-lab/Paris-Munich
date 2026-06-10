@@ -71,6 +71,46 @@
         "mean_nll": 1.4040034420503755,
         "mean_crps": 0.006756439782960472
       }
+    },
+    {
+      "version": "lfpb_metar_tmax_icon_d2_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\lfpb_metar_tmax_icon_d2_v1.joblib",
+      "metadata_path": "data\\models\\lfpb_metar_tmax_icon_d2_v1.metadata.json",
+      "metrics": {
+        "model_variant": "lfpb_icon_d2_ensemble_candidate",
+        "rows": 488,
+        "distinct_days": 61,
+        "mae_expected": 0.533824625,
+        "rmse_expected": 0.7794100717,
+        "bias_expected": 0.2600992622,
+        "mean_nll": 1.2430162625,
+        "mean_crps": 0.0288144769,
+        "brier_upside_ge_1c": 0.0503927985,
+        "brier_upside_ge_2c": 0.0461685234,
+        "brier_upside_ge_3c": 0.0557552955,
+        "coverage_80": 0.9036885246
+      }
+    },
+    {
+      "version": "lfpb_metar_tmax_icon_d2_spatial_candidate_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\lfpb_metar_tmax_icon_d2_spatial_candidate_v1.joblib",
+      "metadata_path": "data\\models\\lfpb_metar_tmax_icon_d2_spatial_candidate_v1.metadata.json",
+      "metrics": {
+        "model_variant": "spatial_metar_icon_d2",
+        "rows": 488,
+        "distinct_days": 61,
+        "mae_expected": 0.6500456075434723,
+        "rmse_expected": 0.9680060436901858,
+        "bias_expected": 0.1390728013242646,
+        "mean_nll": 1.1367650052854616,
+        "mean_crps": 0.02915105752171976,
+        "brier_upside_ge_1c": 0.04829379254147372,
+        "brier_upside_ge_2c": 0.0439524567144438,
+        "brier_upside_ge_3c": 0.04893768459264796,
+        "coverage_80": 0.9610655737704918
+      }
     }
   ],
   "promotion": {

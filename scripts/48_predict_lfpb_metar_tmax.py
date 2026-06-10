@@ -13,6 +13,7 @@ from weather_tmax_bot.data.nwp import NWPArchive
 from weather_tmax_bot.data.open_meteo import fetch_open_meteo_live_extract
 from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_upside_features
 from weather_tmax_bot.features.nwp_features import build_nwp_features
+from weather_tmax_bot.features.spatial_metar import DEFAULT_SPATIAL_STATIONS, build_spatial_metar_features
 from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.operations.refresh import refresh_awc_live
@@ -28,6 +29,10 @@ METADATA_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.metadata.json")
 LIVE_NWP_PATH = Path("data/forecasts/open_meteo_archive_LFPB.parquet")
 HISTORICAL_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_icon_d2_LFPB.parquet")
 SURVIVAL_DATASET_PATH = Path("data/processed/metar_upside_dataset_LFPB_icon_d2.parquet")
+SPATIAL_CANDIDATE_MODEL_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_candidate_v1.joblib")
+SPATIAL_CANDIDATE_METADATA_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_candidate_v1.metadata.json")
+SPATIAL_CANDIDATE_LOCAL_HOUR_START = 12
+SPATIAL_CANDIDATE_LOCAL_HOUR_END = 18
 
 
 def main() -> None:
@@ -36,12 +41,16 @@ def main() -> None:
     issue_is_now = args.issue_time in (None, "now")
     if args.auto_refresh and issue_is_now:
         refresh_summary = {"awc": refresh_awc_live(args.airport)}
+        if args.spatial_candidate:
+            refresh_summary["spatial_awc"] = _refresh_spatial_awc_live()
         if args.refresh_nwp:
             refresh_summary["open_meteo_nwp"] = _refresh_open_meteo_live(args.airport, None)
     issue_time_utc = parse_issue_time(args.issue_time)
     target_date = date.fromisoformat(args.target_date) if args.target_date else to_local_date(issue_time_utc, TIMEZONE)
     if args.auto_refresh and not issue_is_now:
         refresh_summary = {"awc": refresh_awc_live(args.airport)}
+        if args.spatial_candidate:
+            refresh_summary["spatial_awc"] = _refresh_spatial_awc_live()
         if args.refresh_nwp:
             refresh_summary["open_meteo_nwp"] = _refresh_open_meteo_live(args.airport, target_date)
     metar = _load_metar(args.airport)
@@ -73,6 +82,13 @@ def main() -> None:
         historical_dataset_path=SURVIVAL_DATASET_PATH,
     )
     distribution = survival_adjustment.distribution
+    feature_row["production_expected_tmax_c"] = distribution.expected_tmax_c
+    spatial_candidate = _predict_spatial_candidate(
+        enabled=args.spatial_candidate,
+        target_date=target_date,
+        issue_time_utc=issue_time_utc,
+        base_feature_row=feature_row,
+    )
     forecast_id = None
     if args.log:
         forecast_id = log_forecast(
@@ -87,6 +103,7 @@ def main() -> None:
                 "model_family": "metar_tmax_remaining_upside",
                 "intraday_survival_layer": survival_adjustment.details,
                 "base_forecast_before_intraday_survival": base_distribution.to_payload(),
+                "spatial_candidate": spatial_candidate,
             },
             model_version=metadata.get("model_version", "lfpb_metar_tmax_upside_v1"),
         )
@@ -104,6 +121,7 @@ def main() -> None:
         "forecast": distribution.to_payload(),
         "base_forecast_before_intraday_survival": base_distribution.to_payload(),
         "intraday_survival_layer": survival_adjustment.details,
+        "spatial_candidate": spatial_candidate,
         "metar_signal": {
             "latest_metar_time_utc": feature_row.get("latest_metar_time_utc"),
             "latest_metar_temp_c": feature_row.get("latest_metar_temp_c"),
@@ -163,6 +181,109 @@ def _load_metar(airport: str) -> pd.DataFrame:
     else:
         frame = frame.drop_duplicates(subset=["observation_time_utc", "raw_metar"], keep="last")
     return frame
+
+
+def _refresh_spatial_awc_live() -> dict:
+    summary = {}
+    for station in DEFAULT_SPATIAL_STATIONS:
+        try:
+            summary[station] = refresh_awc_live(station)
+        except Exception as exc:
+            summary[station] = {"error": str(exc)}
+    return summary
+
+
+def _predict_spatial_candidate(
+    *,
+    enabled: bool,
+    target_date: date,
+    issue_time_utc,
+    base_feature_row: dict,
+) -> dict:
+    local_hour = int(pd.Timestamp(issue_time_utc).tz_convert(TIMEZONE).hour)
+    active_window = [SPATIAL_CANDIDATE_LOCAL_HOUR_START, SPATIAL_CANDIDATE_LOCAL_HOUR_END]
+    base = {
+        "enabled": bool(enabled),
+        "active": False,
+        "active_local_hour_window": active_window,
+        "local_issue_hour": local_hour,
+        "model_version": None,
+        "reason": None,
+    }
+    if not enabled:
+        base["reason"] = "spatial_candidate_disabled"
+        return base
+    if not (SPATIAL_CANDIDATE_LOCAL_HOUR_START <= local_hour <= SPATIAL_CANDIDATE_LOCAL_HOUR_END):
+        base["reason"] = "outside_spatial_candidate_local_hour_window"
+        return base
+    if not SPATIAL_CANDIDATE_MODEL_PATH.exists():
+        base["reason"] = f"missing_model:{SPATIAL_CANDIDATE_MODEL_PATH}"
+        return base
+    try:
+        neighbor_metars = {station: _load_metar(station) for station in DEFAULT_SPATIAL_STATIONS}
+        spatial_features = build_spatial_metar_features(
+            base_feature_row,
+            neighbor_metars,
+            target_date_local=target_date,
+            issue_time_utc=issue_time_utc,
+            timezone_name=TIMEZONE,
+            stations=DEFAULT_SPATIAL_STATIONS,
+        )
+        spatial_row = {**base_feature_row, **spatial_features}
+        if not spatial_features.get("spatial_leakage_check_passed", False):
+            base["reason"] = "spatial_leakage_check_failed"
+            return base
+        if int(spatial_features.get("spatial_available_station_count") or 0) <= 0:
+            base["reason"] = "no_spatial_neighbor_metar_available_as_of_issue_time"
+            return base
+        model = joblib.load(SPATIAL_CANDIDATE_MODEL_PATH)
+        metadata = _load_json(SPATIAL_CANDIDATE_METADATA_PATH)
+        raw_distribution = model.predict_distribution(spatial_row)
+        survival_adjustment = apply_metar_intraday_survival_layer(
+            raw_distribution,
+            spatial_row,
+            historical_dataset_path=SURVIVAL_DATASET_PATH,
+        )
+        final_distribution = survival_adjustment.distribution
+        production_expected = base_feature_row.get("production_expected_tmax_c")
+        return {
+            **base,
+            "active": True,
+            "reason": "active_midday_spatial_metar_candidate",
+            "model_version": metadata.get("model_version", getattr(model, "model_version", "spatial_candidate")),
+            "forecast": final_distribution.to_payload(),
+            "forecast_before_intraday_survival": raw_distribution.to_payload(),
+            "intraday_survival_layer": survival_adjustment.details,
+            "spatial_features": {
+                "available_station_count": spatial_features.get("spatial_available_station_count"),
+                "latest_temp_mean_c": spatial_features.get("spatial_latest_temp_mean_c"),
+                "latest_temp_max_c": spatial_features.get("spatial_latest_temp_max_c"),
+                "current_max_mean_c": spatial_features.get("spatial_current_max_mean_c"),
+                "current_max_max_c": spatial_features.get("spatial_current_max_max_c"),
+                "latest_minus_lfpb_latest_mean_c": spatial_features.get("spatial_latest_minus_lfpb_latest_mean_c"),
+                "max_minus_lfpb_current_max_mean_c": spatial_features.get("spatial_max_minus_lfpb_current_max_mean_c"),
+                "any_neighbor_above_lfpb_latest": spatial_features.get("spatial_any_neighbor_above_lfpb_latest"),
+                "any_neighbor_above_lfpb_current_max": spatial_features.get("spatial_any_neighbor_above_lfpb_current_max"),
+                "max_feature_knowledge_time_utc": spatial_features.get("spatial_max_feature_knowledge_time_utc"),
+            },
+            "neighbor_stations": {
+                station: {
+                    "available": spatial_features.get(f"spatial_{station.lower()}_available"),
+                    "latest_temp_c": spatial_features.get(f"spatial_{station.lower()}_latest_temp_c"),
+                    "current_max_c": spatial_features.get(f"spatial_{station.lower()}_current_max_c"),
+                    "age_minutes": spatial_features.get(f"spatial_{station.lower()}_age_minutes"),
+                    "has_rain_recent": spatial_features.get(f"spatial_{station.lower()}_has_rain_recent"),
+                }
+                for station in DEFAULT_SPATIAL_STATIONS
+            },
+            "expected_delta_vs_production_c": (
+                None
+                if production_expected is None or pd.isna(production_expected)
+                else final_distribution.expected_tmax_c - float(production_expected)
+            ),
+        }
+    except Exception as exc:
+        return {**base, "reason": f"spatial_candidate_unavailable:{exc}"}
 
 
 def _refresh_open_meteo_live(airport: str, target_date_local: date | None) -> dict:
@@ -286,6 +407,7 @@ def _format_message(payload: dict) -> str:
             f"До коррекции +1 °C: {_fmt_percent(survival.get('original_probability_upside_ge_1c'))}",
             f"Вес коррекции: {_fmt_percent(survival.get('effective_strength'))}",
             "",
+            *_format_spatial_candidate_lines(payload),
             "<b>Калибровка</b>",
             f"Статус: {'включена' if payload.get('calibration_attached') else 'не включена'}",
             f"Метод: <code>{payload.get('calibration')}</code>",
@@ -306,6 +428,70 @@ def _fmt_float(value) -> str:
     if value is None or pd.isna(value):
         return "н/д"
     return f"{float(value):+.1f}"
+
+
+def _format_spatial_candidate_lines(payload: dict) -> list[str]:
+    candidate = payload.get("spatial_candidate") or {}
+    if not candidate.get("enabled", False):
+        return []
+    if not candidate.get("active", False):
+        reason = str(candidate.get("reason") or "")
+        if reason == "outside_spatial_candidate_local_hour_window":
+            return []
+        return [
+            "<b>Spatial candidate LFPG/LFPO</b>",
+            "Кандидат не влияет на основной прогноз.",
+            f"Статус: не активен ({reason or 'причина неизвестна'})",
+            "",
+        ]
+    forecast = candidate.get("forecast") or {}
+    thresholds = forecast.get("threshold_probabilities") or {}
+    spatial = candidate.get("spatial_features") or {}
+    neighbors = candidate.get("neighbor_stations") or {}
+    delta = candidate.get("expected_delta_vs_production_c")
+    neighbor_lines = []
+    for station, info in neighbors.items():
+        if not info.get("available"):
+            neighbor_lines.append(f"{station}: нет свежих данных")
+            continue
+        neighbor_lines.append(
+            f"{station}: сейчас {_fmt_signed_plain(info.get('latest_temp_c'))} °C, "
+            f"max {_fmt_signed_plain(info.get('current_max_c'))} °C, "
+            f"возраст {_fmt_plain(info.get('age_minutes'))} мин"
+        )
+    return [
+        "<b>Spatial candidate LFPG/LFPO</b>",
+        "Параллельный кандидат, не влияет на основной прогноз. Активен только 12:00-18:00 по Парижу.",
+        f"Ожидаемый METAR Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} °C</b> ({_fmt_delta(delta)} к production)",
+        f"Медиана: {float(forecast.get('median_tmax_c', 0.0)):.1f} °C",
+        f"Самая вероятная корзина: <b>{forecast.get('most_likely_integer_c')} °C</b>",
+        f"80% интервал: {float((forecast.get('intervals') or {}).get('80', [0.0, 0.0])[0]):.1f}...{float((forecast.get('intervals') or {}).get('80', [0.0, 0.0])[1]):.1f} °C",
+        f"P(Tmax >= 25 °C): {float(thresholds.get('ge_25', 0.0)):.1%}",
+        f"P(Tmax >= 30 °C): {float(thresholds.get('ge_30', 0.0)):.1%}",
+        f"Соседних станций доступно: {int(spatial.get('available_station_count') or 0)}",
+        f"Средняя текущая температура соседей: {_fmt_signed_plain(spatial.get('latest_temp_mean_c'))} °C",
+        f"Средний максимум соседей: {_fmt_signed_plain(spatial.get('current_max_mean_c'))} °C",
+        *(neighbor_lines or ["Соседи: нет данных"]),
+        "",
+    ]
+
+
+def _fmt_plain(value) -> str:
+    if value is None or pd.isna(value):
+        return "н/д"
+    return f"{float(value):.0f}"
+
+
+def _fmt_signed_plain(value) -> str:
+    if value is None or pd.isna(value):
+        return "н/д"
+    return f"{float(value):.1f}"
+
+
+def _fmt_delta(value) -> str:
+    if value is None or pd.isna(value):
+        return "н/д"
+    return f"{float(value):+.1f} °C"
 
 
 def _fmt_percent(value) -> str:
@@ -332,6 +518,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--log", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-path", type=Path, default=MODEL_PATH)
     parser.add_argument("--metadata-path", type=Path, default=METADATA_PATH)
+    parser.add_argument("--spatial-candidate", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--report-path", default="data/reports/latest_lfpb_metar_tmax_prediction.json")
     return parser.parse_args()
 
