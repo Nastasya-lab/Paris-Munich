@@ -89,7 +89,6 @@ def format_operational_cycle_message(summary: dict) -> str:
         *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
         *_format_intraday_summary(forecast.get("forecast_components", {})),
-        *_format_phase_arbitrated_summary(forecast.get("forecast_components", {})),
         *_format_growth_potential_summary(forecast.get("forecast_components", {})),
         "",
         "<b>Данные</b>",
@@ -469,7 +468,6 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
     lines.extend(["", *_format_latest_metar_record(latest_metar)])
     lines.extend(["", *_format_distribution_change(payload, previous)])
     lines.extend(_format_source_compatibility(payload.get("source_compatibility", {})))
-    lines.extend(_format_phase_arbitrated_summary(forecast_components))
     lines.extend(_format_growth_potential_summary(forecast_components))
     shadow_final = {}
     shadow_intraday = shadow.get("intraday_update") or {}

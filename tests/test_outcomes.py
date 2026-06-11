@@ -73,14 +73,7 @@ def test_update_forecast_outcomes(tmp_path):
     assert output_path.exists()
     assert variant_output_path.exists()
     variants = pd.read_parquet(variant_output_path)
-    assert set(variants["forecast_variant"]) == {"production_champion", "shadow_phase_arbitrated"}
-    assert variants.loc[variants["forecast_variant"] == "shadow_phase_arbitrated", "probability_actual_integer_bin"].iloc[0] == 0.8
-    shadow = variants[variants["forecast_variant"] == "shadow_phase_arbitrated"].iloc[0]
-    assert shadow["variant_version"] == "phase_arbitrated_shadow_v1"
-    assert shadow["forecast_phase"] == "midday_update"
-    assert shadow["scenario_tracking"] == "near_observed_track"
-    assert shadow["probability_above_actual_integer_bin"] == 0.2
-    assert shadow["coverage_80"] == True
+    assert set(variants["forecast_variant"]) == {"production_champion"}
     assert out.iloc[0]["forecast_id"] == "f1"
     assert out.iloc[0]["metar_source_mismatch"] == True
     assert out.iloc[0]["nwp_source_mismatch"] == True

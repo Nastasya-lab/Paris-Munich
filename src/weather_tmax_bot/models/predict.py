@@ -87,7 +87,7 @@ def predict_best_available(
         warnings.extend(source_compatibility["warnings"])
         component_variants = {
             "production_champion": {
-                "description": "Operational distribution returned to users.",
+                "description": "Operational intraday distribution before optional late-day promotion.",
                 "distribution": dist.to_payload(),
                 "metadata": {
                     "variant_version": "production_dynamic_v1",
@@ -121,14 +121,13 @@ def predict_best_available(
                     **ml_shadow_details,
                 },
             }
-        model_disagreement = assess_model_disagreement(component_variants)
-        feature_row["model_disagreement"] = model_disagreement
+        pre_promotion_disagreement = assess_model_disagreement(component_variants)
         blended_shadow = build_blended_shadow_candidate(
             dist,
             shadow_intraday.distribution,
             phase_details=shadow_intraday.details,
             ml_shadow_details=ml_shadow_details,
-            model_disagreement=model_disagreement,
+            model_disagreement=pre_promotion_disagreement,
             source_compatibility=feature_row["source_compatibility"],
             freshness=feature_row["freshness"],
         )
@@ -144,14 +143,34 @@ def predict_best_available(
             ml_shadow=ml_shadow_dist,
             local_hour=float(intraday.details.get("local_issue_hour") or 0.0),
         )
-        feature_row["forecast_variants"] = {
-            "production_champion": component_variants["production_champion"],
-            "shadow_phase_arbitrated": {
-                "description": "Phase-arbitrated shadow candidate based on operational ablation; never used as the operational forecast.",
-                "distribution": phase_arbitrated.distribution.to_payload(),
-                "metadata": phase_arbitrated.details,
+        late_day_promotion = _late_day_promotion_payload(phase_arbitrated.details, dist)
+        if phase_arbitrated.details.get("selected_variant") == "shadow_intraday_ml":
+            dist = phase_arbitrated.distribution
+            late_day_promotion.update(
+                {
+                    "active": True,
+                    "status": "promoted_to_production",
+                    "promoted_expected_tmax_c": dist.expected_tmax_c,
+                    "promoted_distribution": dist.to_payload(),
+                }
+            )
+            warnings.append("Late-day ML remaining-upside component promoted into production forecast.")
+        component_variants["production_champion"] = {
+            "description": "Operational distribution returned to users.",
+            "distribution": dist.to_payload(),
+            "metadata": {
+                "variant_version": (
+                    "production_dynamic_late_day_ml_v2" if late_day_promotion.get("active") else "production_dynamic_v1"
+                ),
+                **intraday.details,
+                "late_day_promotion": late_day_promotion,
             },
         }
+        feature_row["forecast_variants"] = {
+            "production_champion": component_variants["production_champion"],
+        }
+        model_disagreement = assess_model_disagreement(component_variants)
+        feature_row["model_disagreement"] = model_disagreement
         feature_row["component_variants"] = component_variants
         feature_row["growth_potential"] = _growth_potential_payload(ml_shadow_details)
         feature_row["intraday_update"] = intraday.details
@@ -165,6 +184,7 @@ def predict_best_available(
             },
             "intraday_model": intraday.details.get("intraday_model"),
             "final_model": intraday.details.get("final_model"),
+            "late_day_promotion": late_day_promotion,
             "shadow_mode": {
                 "name": "phase_aware_intraday_challenger_v3",
                 "status": "shadow_only_does_not_affect_operational_forecast",
@@ -194,13 +214,6 @@ def predict_best_available(
                 "details": blended_shadow.details,
                 "final_model": blended_shadow.distribution.to_payload(),
                 "comparison_to_champion": _distribution_comparison(blended_shadow.distribution, dist),
-            },
-            "phase_arbitrated_shadow_mode": {
-                "name": "phase_arbitrated_shadow_v1",
-                "status": "shadow_only_does_not_affect_operational_forecast",
-                "details": phase_arbitrated.details,
-                "final_model": phase_arbitrated.distribution.to_payload(),
-                "comparison_to_champion": _distribution_comparison(phase_arbitrated.distribution, dist),
             },
         }
         if intraday.details.get("active"):
@@ -244,6 +257,18 @@ def _growth_potential_payload(ml_shadow_details: dict) -> dict:
         "probability_upside_ge_3c": ml_shadow_details.get("probability_upside_ge_3c"),
         "calibration_status": ml_shadow_details.get("calibration_status"),
         "reason": ml_shadow_details.get("reason"),
+    }
+
+
+def _late_day_promotion_payload(phase_details: dict, champion_dist) -> dict:
+    return {
+        "active": False,
+        "status": "not_promoted",
+        "promotion_rule": "promote_shadow_intraday_ml_when_phase_arbitration_selects_late_day_ml",
+        "selected_variant": phase_details.get("selected_variant"),
+        "selection_reason": phase_details.get("selection_reason"),
+        "local_issue_hour": phase_details.get("local_issue_hour"),
+        "pre_promotion_expected_tmax_c": champion_dist.expected_tmax_c,
     }
 
 

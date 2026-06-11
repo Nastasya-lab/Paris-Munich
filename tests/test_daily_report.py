@@ -29,9 +29,9 @@ def test_preliminary_daily_report_scores_variants_from_forecast_log(tmp_path):
 
     assert report["status"] == "ok"
     assert report["actual_tmax_c"] == 25.0
-    assert report["best_variant"]["forecast_variant"] == "shadow_phase_arbitrated"
+    assert report["best_variant"]["forecast_variant"] == "production_champion"
     assert report["worst_variant"]["forecast_variant"] == "production_champion"
-    assert report["hourly_comparison"][0]["best_variant"] == "shadow_phase_arbitrated"
+    assert report["hourly_comparison"][0]["best_variant"] == "production_champion"
 
 
 def test_final_daily_report_scores_dwd_variant_monitoring(tmp_path):
@@ -53,7 +53,7 @@ def test_final_daily_report_scores_dwd_variant_monitoring(tmp_path):
 
     assert report["status"] == "ok"
     assert report["truth_source"] == "DWD 10-minute truth"
-    assert report["best_variant"]["forecast_variant"] == "shadow_phase_arbitrated"
+    assert report["best_variant"]["forecast_variant"] == "production_champion"
 
 
 def test_final_daily_report_waits_for_dwd_scored_rows(tmp_path):
@@ -112,24 +112,23 @@ def test_daily_report_message_is_human_readable():
             "mode": "preliminary_metar",
             "actual_tmax_c": 25.0,
             "truth_source": "operational METAR max",
-            "analysis": ["Лучше всего выглядел shadow_phase_arbitrated."],
+            "analysis": ["Лучше всего выглядел production_champion."],
             "summary_by_variant": [
                 {
-                    "forecast_variant": "shadow_phase_arbitrated",
+                    "forecast_variant": "production_champion",
                     "mae_expected": 0.2,
                     "bias_expected": 0.1,
                     "mean_probability_actual_integer_bin": 0.8,
                     "coverage_ratio": 1.0,
                 }
             ],
-            "best_variant": {"forecast_variant": "shadow_phase_arbitrated"},
+            "best_variant": {"forecast_variant": "production_champion"},
             "worst_variant": {"forecast_variant": "production_champion"},
             "hourly_comparison": [
                 {
                     "local_hour": 18,
-                    "best_variant": "shadow_phase_arbitrated",
+                    "best_variant": "production_champion",
                     "variants": [
-                        {"forecast_variant": "shadow_phase_arbitrated", "mae_expected": 0.2},
                         {"forecast_variant": "production_champion", "mae_expected": 0.5},
                     ],
                 }
@@ -139,9 +138,9 @@ def test_daily_report_message_is_human_readable():
 
     assert "Вечерний предварительный разбор моделей" in text
     assert "Предварительный максимум по METAR" in text
-    assert "shadow_phase_arbitrated" in text
+    assert "shadow_phase_arbitrated" not in text
     assert "production_champion" in text
-    assert "18:00" in text
+    assert "18:00" not in text
     assert "после прихода DWD truth" in text
 
 

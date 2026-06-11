@@ -13,7 +13,7 @@ from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.notifications.telegram import format_daily_model_report_message, notify_if_configured
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
-REPORT_VARIANTS = {"production_champion", "shadow_phase_arbitrated"}
+REPORT_VARIANTS = {"production_champion"}
 
 
 def run_daily_model_report(
@@ -248,20 +248,6 @@ def _score_record_variants(record: dict, actual: float) -> list[dict]:
         dist = _variant_distribution(payload)
         if dist is not None:
             rows.append(_score_distribution(record, actual, str(name), dist))
-    fallbacks = {
-        "shadow_phase_arbitrated": (
-            (metadata.get("forecast_components", {}) or {}).get("phase_arbitrated_shadow_mode", {}) or {}
-        ).get(
-            "final_model", {}
-        ),
-    }
-    existing = {row["forecast_variant"] for row in rows}
-    for name, payload in fallbacks.items():
-        if name in existing:
-            continue
-        dist = _distribution_from_probabilities((payload or {}).get("probabilities_by_integer_c") or {})
-        if dist is not None:
-            rows.append(_score_distribution(record, actual, name, dist))
     return rows
 
 

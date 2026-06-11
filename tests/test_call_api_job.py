@@ -91,13 +91,13 @@ def test_compact_daily_report_result_keeps_model_summary():
             "airport": "EDDM",
             "target_date_local": "2026-06-02",
             "mode": "preliminary_metar",
-            "best_variant": {"forecast_variant": "shadow_phase_arbitrated"},
+            "best_variant": {"forecast_variant": "production_champion"},
             "worst_variant": {"forecast_variant": "production_champion"},
             "telegram_notification": {"sent": True, "response": {"large": "body"}},
         },
     )
 
-    assert compact["best_variant"] == "shadow_phase_arbitrated"
+    assert compact["best_variant"] == "production_champion"
     assert compact["worst_variant"] == "production_champion"
     assert compact["notification_sent"] is True
     assert "telegram_notification" not in compact
@@ -125,7 +125,7 @@ def test_forecast_job_attaches_daily_report_when_available(monkeypatch, capsys):
             {
                 "status": "ok",
                 "mode": "preliminary_metar",
-                "best_variant": {"forecast_variant": "shadow_phase_arbitrated"},
+                "best_variant": {"forecast_variant": "production_champion"},
                 "worst_variant": {"forecast_variant": "production_champion"},
                 "telegram_notification": {"sent": True},
             }
@@ -149,7 +149,7 @@ def test_forecast_job_attaches_daily_report_when_available(monkeypatch, capsys):
     assert len(calls) == 2
     assert calls[1][0].endswith("/daily-report")
     assert '"daily_report"' in out
-    assert "shadow_phase_arbitrated" in out
+    assert "production_champion" in out
 
 
 def test_daily_report_not_ready_is_not_logged(monkeypatch):

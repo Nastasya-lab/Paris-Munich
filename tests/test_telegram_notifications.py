@@ -106,7 +106,7 @@ def test_operational_cycle_message_escapes_dynamic_html():
     assert "<unsafe>" not in text
 
 
-def test_operational_cycle_message_includes_only_public_challenger_and_growth_potential():
+def test_operational_cycle_message_hides_challenger_and_keeps_growth_potential():
     text = telegram.format_operational_cycle_message(
         {
             "accepted": True,
@@ -125,8 +125,8 @@ def test_operational_cycle_message_includes_only_public_challenger_and_growth_po
         }
     )
 
-    assert "phase-arbitrated" in text
-    assert "safe-blend" in text
+    assert "phase-arbitrated" not in text
+    assert "safe-blend" not in text
     assert "+3" in text
     assert "ML shadow: remaining upside" not in text
     assert "Shadow-" not in text
@@ -191,7 +191,7 @@ def test_metar_event_message_says_when_distribution_is_unchanged():
     assert "+0.0" in text
 
 
-def test_metar_event_message_includes_public_challenger_and_growth_potential():
+def test_metar_event_message_hides_challenger_and_keeps_growth_potential():
     text = telegram.format_metar_event_message(
         {
             "airport": "EDDM",
@@ -206,8 +206,8 @@ def test_metar_event_message_includes_public_challenger_and_growth_potential():
         {"previous": None, "current": {}, "deltas": {}},
     )
 
-    assert "phase-arbitrated" in text
-    assert "safe-blend" in text
+    assert "phase-arbitrated" not in text
+    assert "safe-blend" not in text
     assert "+1" in text
     assert "+2" in text
     assert "+3" in text
@@ -256,23 +256,15 @@ def test_daily_model_report_message_includes_hourly_comparison():
                     "mean_probability_actual_integer_bin": 0.5,
                     "coverage_ratio": 1.0,
                 },
-                {
-                    "forecast_variant": "shadow_phase_arbitrated",
-                    "mae_expected": 0.2,
-                    "bias_expected": 0.1,
-                    "mean_probability_actual_integer_bin": 0.8,
-                    "coverage_ratio": 1.0,
-                },
             ],
-            "best_variant": {"forecast_variant": "shadow_phase_arbitrated"},
+            "best_variant": {"forecast_variant": "production_champion"},
             "worst_variant": {"forecast_variant": "production_champion"},
             "hourly_comparison": [
                 {
                     "local_hour": 18,
-                    "best_variant": "shadow_phase_arbitrated",
+                    "best_variant": "production_champion",
                     "variants": [
                         {"forecast_variant": "production_champion", "mae_expected": 0.5},
-                        {"forecast_variant": "shadow_phase_arbitrated", "mae_expected": 0.2},
                     ],
                 }
             ],
@@ -281,8 +273,8 @@ def test_daily_model_report_message_includes_hourly_comparison():
 
     assert "EDDM" in text
     assert "production_champion" in text
-    assert "shadow_phase_arbitrated" in text
-    assert "18:00" in text
+    assert "shadow_phase_arbitrated" not in text
+    assert "18:00" not in text
 
 
 def test_outcome_and_healthcheck_messages_are_not_empty():

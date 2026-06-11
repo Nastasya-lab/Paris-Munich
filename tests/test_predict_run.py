@@ -1,6 +1,9 @@
 import json
 from datetime import date, datetime, timezone
 
+import numpy as np
+
+from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.operations.predict_run import run_prediction
 from weather_tmax_bot.operations.predict_run import run_prediction_with_optional_refresh
 from weather_tmax_bot.operations.run_report import operational_prediction_payload
@@ -44,10 +47,8 @@ def test_run_prediction_logs_acceptance_metadata(tmp_path, monkeypatch):
     assert "forecast_acceptance" in record["raw_input_metadata"]
     assert "forecast_variants" in record["raw_input_metadata"]
     assert "production_champion" in record["raw_input_metadata"]["forecast_variants"]
-    assert "shadow_phase_arbitrated" in record["raw_input_metadata"]["forecast_variants"]
     assert set(record["raw_input_metadata"]["forecast_variants"]) == {
         "production_champion",
-        "shadow_phase_arbitrated",
     }
     assert "component_variants" in record["raw_input_metadata"]
     assert "shadow_seasonal_intraday" in record["raw_input_metadata"]["component_variants"]
@@ -55,7 +56,7 @@ def test_run_prediction_logs_acceptance_metadata(tmp_path, monkeypatch):
     assert "growth_potential" in record["raw_input_metadata"]
     assert "ml_shadow_mode" in record["raw_input_metadata"]["forecast_components"]
     assert "blended_shadow_mode" in record["raw_input_metadata"]["forecast_components"]
-    assert "phase_arbitrated_shadow_mode" in record["raw_input_metadata"]["forecast_components"]
+    assert "phase_arbitrated_shadow_mode" not in record["raw_input_metadata"]["forecast_components"]
     assert record["raw_input_metadata"]["forecast_acceptance"]["accepted"] == result["forecast_acceptance"]["accepted"]
 
 
@@ -97,3 +98,34 @@ def test_intraday_ml_shadow_load_failure_degrades_without_crashing(tmp_path, mon
     assert dist is None
     assert details["active"] is False
     assert "intraday_ml_prediction_unavailable" in details["reason"]
+
+
+def test_late_day_ml_component_is_promoted_to_production(monkeypatch):
+    promoted = TmaxDistribution(np.array([17, 18]), np.array([0.1, 0.9]))
+
+    def fake_ml_shadow(feature_row):
+        return promoted, {
+            "active": True,
+            "calibration_status": "contextual_out_of_fold_survival_calibrated",
+            "probability_peak_already_passed": 0.9,
+            "probability_upside_ge_1c": 0.1,
+            "probability_upside_ge_2c": 0.0,
+            "probability_upside_ge_3c": 0.0,
+        }
+
+    monkeypatch.setattr(predict_module, "_predict_intraday_ml_shadow", fake_ml_shadow)
+
+    result = run_prediction(
+        airport="EDDM",
+        target_date_local=date(2026, 6, 11),
+        issue_time_utc=datetime(2026, 6, 11, 15, 30, tzinfo=timezone.utc),
+        log=False,
+        mode="test",
+    )
+
+    metadata = result["metadata"]["feature_snapshot"]
+    promotion = metadata["forecast_components"]["late_day_promotion"]
+    assert promotion["active"] is True
+    assert promotion["selected_variant"] == "shadow_intraday_ml"
+    assert result["distribution"].expected_tmax_c == promoted.expected_tmax_c
+    assert set(metadata["forecast_variants"]) == {"production_champion"}

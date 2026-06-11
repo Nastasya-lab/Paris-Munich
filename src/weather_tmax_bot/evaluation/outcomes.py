@@ -10,7 +10,7 @@ from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, nll_intege
 from weather_tmax_bot.models.distribution import TmaxDistribution
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
-REPORT_VARIANTS = {"production_champion", "shadow_phase_arbitrated"}
+REPORT_VARIANTS = {"production_champion"}
 
 
 def update_forecast_outcomes(
