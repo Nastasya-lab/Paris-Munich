@@ -1,7 +1,8 @@
 {
   "model_name": "ordinal_intraday_remaining_upside",
   "model_version": "intraday_ml_core_challenger_v1",
-  "mode": "shadow_only",
+  "mode": "late_day_production_component",
+  "training_source": "data\\processed\\intraday_ml_dataset_enhanced.parquet",
   "training_period": [
     "2020-01-01",
     "2025-12-30"
@@ -90,18 +91,18 @@
       "false_upside_increase_within_8pp": true
     },
     "raw": {
-      "mae_expected": 1.4253248749080072,
-      "mean_nll": 4.522290537395477,
-      "mean_crps": 0.05195024890984379,
-      "coverage_80": 0.5785512699905927,
-      "mean_false_upside_probability": 0.33573228828664264
+      "mae_expected": 1.4309475230334656,
+      "mean_nll": 4.160310118293822,
+      "mean_crps": 0.05064509199816163,
+      "coverage_80": 0.6001881467544685,
+      "mean_false_upside_probability": 0.33539826831805225
     },
     "calibrated": {
-      "mae_expected": 1.6404744491533199,
-      "mean_nll": 4.701704401352137,
-      "mean_crps": 0.05260512851040853,
-      "coverage_80": 0.6406396989651929,
-      "mean_false_upside_probability": 0.3699337197905212
+      "mae_expected": 1.6169876720134355,
+      "mean_nll": 4.6635059194547,
+      "mean_crps": 0.05173341923830911,
+      "coverage_80": 0.6415804327375353,
+      "mean_false_upside_probability": 0.3684150505384303
     }
   },
   "calibration_folds": [
@@ -162,7 +163,7 @@
       "holdout_rows": 210
     }
   ],
-  "feature_set_version": "intraday_ml_core.v1",
+  "feature_set_version": "intraday_ml_core.enhanced_metar.v2",
   "feature_columns": [
     "issue_hour_utc",
     "issue_hour_continuous_utc",
@@ -211,10 +212,67 @@
     "model_gust_max",
     "model_pressure_mean",
     "model_dewpoint_mean",
-    "model_relative_humidity_mean"
+    "model_relative_humidity_mean",
+    "temp_slope_since_sunrise",
+    "temp_trend_last_2_metars",
+    "latest_2_metar_temp_change_c",
+    "cloud_cover_proxy_latest",
+    "cloud_cover_proxy_trend_last_2_metars",
+    "cloud_cover_proxy_trend_2h",
+    "lowest_ceiling_ft_latest",
+    "ceiling_trend_last_2_metars",
+    "ceiling_trend_2h",
+    "dewpoint_depression_latest",
+    "dewpoint_depression_trend_2h",
+    "pressure_tendency_1h",
+    "pressure_tendency_3h",
+    "wind_dir_shift_2h_deg",
+    "wind_speed_trend_2h",
+    "wind_direction_latest_deg",
+    "wind_speed_latest_kt",
+    "rain_started_after_current_max",
+    "cb_tcu_appeared_after_current_max",
+    "showers_appeared_after_current_max",
+    "fog_or_br_recent_metar",
+    "cavok_trend_last_2_metars",
+    "metar_minutes_since_current_max",
+    "metar_hours_since_sunrise",
+    "temp_drop_after_rain_start_c",
+    "temp_drop_after_cb_tcu_c",
+    "wind_direction_valid_count_2h"
   ],
+  "enhanced_intraday_feature_columns": [
+    "temp_slope_since_sunrise",
+    "temp_trend_last_2_metars",
+    "latest_2_metar_temp_change_c",
+    "cloud_cover_proxy_latest",
+    "cloud_cover_proxy_trend_last_2_metars",
+    "cloud_cover_proxy_trend_2h",
+    "lowest_ceiling_ft_latest",
+    "ceiling_trend_last_2_metars",
+    "ceiling_trend_2h",
+    "dewpoint_depression_latest",
+    "dewpoint_depression_trend_2h",
+    "pressure_tendency_1h",
+    "pressure_tendency_3h",
+    "wind_dir_shift_2h_deg",
+    "wind_speed_trend_2h",
+    "wind_direction_latest_deg",
+    "wind_speed_latest_kt",
+    "rain_started_after_current_max",
+    "cb_tcu_appeared_after_current_max",
+    "showers_appeared_after_current_max",
+    "fog_or_br_recent_metar",
+    "cavok_trend_last_2_metars",
+    "metar_minutes_since_current_max",
+    "metar_hours_since_sunrise",
+    "temp_drop_after_rain_start_c",
+    "temp_drop_after_cb_tcu_c",
+    "wind_direction_valid_count_2h"
+  ],
+  "max_iter": 50,
   "data_snapshot_hash": "3fb37617f752a11ea7fe82650d0692ecdb165e64747054b273db48d3ffed1ef0",
-  "created_at_utc": "2026-06-02T08:13:52.593438+00:00",
+  "created_at_utc": "2026-06-11T19:07:27.316186+00:00",
   "rolling_backtest": [
     {
       "model_variant": "empirical_hourly_upside_baseline",
@@ -236,33 +294,33 @@
       "model_variant": "intraday_ml_core_challenger_v1",
       "rows": 1063,
       "distinct_target_days": 152,
-      "mae_expected": 1.6404744492,
-      "rmse_expected": 2.311063912,
-      "bias_expected": 0.3601880229,
-      "mean_nll": 4.7017044014,
-      "mean_crps": 0.0526051285,
-      "brier_peak_already_passed": 0.0939350475,
-      "brier_upside_ge_1c": 0.0962477601,
-      "brier_upside_ge_2c": 0.0975497391,
-      "brier_upside_ge_3c": 0.0996316058,
-      "coverage_80": 0.640639699,
-      "mean_false_upside_probability": 0.3699337198
+      "mae_expected": 1.616987672,
+      "rmse_expected": 2.2760583886,
+      "bias_expected": 0.376591427,
+      "mean_nll": 4.6635059195,
+      "mean_crps": 0.0517334192,
+      "brier_peak_already_passed": 0.0941612792,
+      "brier_upside_ge_1c": 0.0967564674,
+      "brier_upside_ge_2c": 0.0937179087,
+      "brier_upside_ge_3c": 0.0945859157,
+      "coverage_80": 0.6415804327,
+      "mean_false_upside_probability": 0.3684150505
     },
     {
       "model_variant": "intraday_ml_core_challenger_v1_raw",
       "rows": 1063,
       "distinct_target_days": 152,
-      "mae_expected": 1.4253248749,
-      "rmse_expected": 2.185665695,
-      "bias_expected": -0.0432517802,
-      "mean_nll": 4.5222905374,
-      "mean_crps": 0.0519502489,
-      "brier_peak_already_passed": 0.0996921936,
-      "brier_upside_ge_1c": 0.0892865072,
-      "brier_upside_ge_2c": 0.0876979045,
-      "brier_upside_ge_3c": 0.089689678,
-      "coverage_80": 0.57855127,
-      "mean_false_upside_probability": 0.3357322883
+      "mae_expected": 1.430947523,
+      "rmse_expected": 2.1563878086,
+      "bias_expected": -0.0292610781,
+      "mean_nll": 4.1603101183,
+      "mean_crps": 0.050645092,
+      "brier_peak_already_passed": 0.0989723285,
+      "brier_upside_ge_1c": 0.0887677091,
+      "brier_upside_ge_2c": 0.0854546625,
+      "brier_upside_ge_3c": 0.086172537,
+      "coverage_80": 0.6001881468,
+      "mean_false_upside_probability": 0.3353982683
     }
   ],
   "folds": [
@@ -420,7 +478,7 @@
   "limitations": [
     "Historical TAF archive is empty, so TAF values degrade to missing flags during training.",
     "ICON-D2 features are optional because honest historical NWP overlap starts in late May 2025.",
-    "Calibration is learned from historical out-of-fold predictions, but the challenger remains shadow-only.",
-    "This artifact is shadow-only and is not registered as the active production model."
+    "Calibration is learned from historical out-of-fold predictions and deployed only if it passes the gate.",
+    "This artifact is promoted only through late-day phase arbitration, not as the full-day base model."
   ]
 }

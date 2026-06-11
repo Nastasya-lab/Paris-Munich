@@ -12,6 +12,7 @@ from weather_tmax_bot.data.storage import write_parquet
 from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, mae, nll_integer_bin, rmse
 from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.models.intraday_ml import (
+    ENHANCED_METAR_INTRADAY_FEATURES,
     IntradayMLSurvivalCalibrator,
     IntradayMLUpsideModel,
     infer_intraday_ml_context,
@@ -22,10 +23,13 @@ from weather_tmax_bot.utils.hashing import stable_hash
 VERSION = "intraday_ml_core_challenger_v1"
 MODEL_PATH = Path("data/models") / f"{VERSION}.joblib"
 METADATA_PATH = Path("data/models") / f"{VERSION}.metadata.json"
+MODEL_MAX_ITER = 50
 
 
 def main() -> None:
-    source = Path("data/processed/intraday_ml_dataset.parquet")
+    source = Path("data/processed/intraday_ml_dataset_enhanced.parquet")
+    if not source.exists():
+        source = Path("data/processed/intraday_ml_dataset.parquet")
     if source.exists():
         dataset = pd.read_parquet(source)
     else:
@@ -39,14 +43,15 @@ def main() -> None:
     calibration_rows, calibration_folds = _build_oof_calibration_rows(usable)
     final_calibrator = IntradayMLSurvivalCalibrator().fit(calibration_rows)
     calibration_deployment = _calibration_deployment_decision(summary)
-    model = IntradayMLUpsideModel().fit(usable)
+    model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER).fit(usable)
     model.calibrator = final_calibrator if calibration_deployment["accepted"] else None
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     metadata = {
         "model_name": "ordinal_intraday_remaining_upside",
         "model_version": VERSION,
-        "mode": "shadow_only",
+        "mode": "late_day_production_component",
+        "training_source": str(source),
         "training_period": [str(usable["target_date_local"].min()), str(usable["target_date_local"].max())],
         "training_rows": len(usable),
         "calibration_version": "intraday_ml_contextual_survival_oof_v2",
@@ -54,8 +59,10 @@ def main() -> None:
         "calibration_metadata": final_calibrator.to_metadata(),
         "calibration_deployment": calibration_deployment,
         "calibration_folds": calibration_folds,
-        "feature_set_version": "intraday_ml_core.v1",
+        "feature_set_version": "intraday_ml_core.enhanced_metar.v2",
         "feature_columns": model.feature_columns,
+        "enhanced_intraday_feature_columns": ENHANCED_METAR_INTRADAY_FEATURES,
+        "max_iter": MODEL_MAX_ITER,
         "data_snapshot_hash": stable_hash({"rows": len(usable), "target_sum": float(usable["tmax_c"].sum())}),
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "rolling_backtest": json.loads(summary.to_json(orient="records")),
@@ -63,8 +70,8 @@ def main() -> None:
         "limitations": [
             "Historical TAF archive is empty, so TAF values degrade to missing flags during training.",
             "ICON-D2 features are optional because honest historical NWP overlap starts in late May 2025.",
-            "Calibration is learned from historical out-of-fold predictions, but the challenger remains shadow-only.",
-            "This artifact is shadow-only and is not registered as the active production model.",
+            "Calibration is learned from historical out-of-fold predictions and deployed only if it passes the gate.",
+            "This artifact is promoted only through late-day phase arbitration, not as the full-day base model.",
         ],
     }
     METADATA_PATH.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
@@ -100,7 +107,7 @@ def _rolling_backtest(dataset: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
                 "test_rows": len(test),
             })
             continue
-        model = IntradayMLUpsideModel().fit(train_core)
+        model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER).fit(train_core)
         calibrator = IntradayMLSurvivalCalibrator(max_upside_c=model.max_upside_c).fit(
             _survival_calibration_rows(model, calibration)
         )
@@ -144,7 +151,7 @@ def _build_oof_calibration_rows(dataset: pd.DataFrame) -> tuple[pd.DataFrame, li
                 "holdout_rows": len(holdout),
             })
             continue
-        model = IntradayMLUpsideModel().fit(train)
+        model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER).fit(train)
         frame = _survival_calibration_rows(model, holdout)
         rows.append(frame)
         folds.append({
@@ -277,7 +284,7 @@ def _doc(metadata: dict, by_hour: pd.DataFrame, by_fold: pd.DataFrame) -> str:
     lines = [
         "# Intraday ML challenger",
         "",
-        "Shadow-only ordinal remaining-upside model. It predicts a monotonic survival curve for future Tmax increases and converts that curve into integer-bin probabilities.",
+        "Late-day ordinal remaining-upside component. It predicts a monotonic survival curve for future Tmax increases and converts that curve into integer-bin probabilities.",
         "",
         f"- model version: `{metadata['model_version']}`",
         f"- training rows: `{metadata['training_rows']}`",

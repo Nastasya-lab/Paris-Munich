@@ -336,6 +336,8 @@ def _load_metar_context(path: str | Path, context_start: pd.Timestamp, context_e
         "wind_direction_deg",
         "wind_speed_kt",
         "gust_kt",
+        "cloud_layers",
+        "ceiling_ft",
         "cavok",
     ]
     try:

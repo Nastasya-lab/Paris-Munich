@@ -1,0 +1,133 @@
+{
+  "created_at_utc": "2026-06-11T18:55:08.976710+00:00",
+  "airport": "EDDM",
+  "experiment": "current Munich intraday ML features vs enhanced same-day METAR features",
+  "target": "official DWD daily Tmax; METAR is used only as as-of intraday signal",
+  "dataset_rows": 15306,
+  "usable_rows": 15299,
+  "days": 2186,
+  "period": [
+    "2020-01-01",
+    "2025-12-30"
+  ],
+  "folds": [
+    {
+      "fold_start": "2025-08-01",
+      "fold_end": "2025-08-31",
+      "status": "evaluated",
+      "train_core_rows": 13641,
+      "calibration_rows": 595,
+      "test_rows": 216
+    },
+    {
+      "fold_start": "2025-09-01",
+      "fold_end": "2025-09-30",
+      "status": "evaluated",
+      "train_core_rows": 13858,
+      "calibration_rows": 594,
+      "test_rows": 210
+    },
+    {
+      "fold_start": "2025-10-01",
+      "fold_end": "2025-10-31",
+      "status": "evaluated",
+      "train_core_rows": 14068,
+      "calibration_rows": 594,
+      "test_rows": 217
+    },
+    {
+      "fold_start": "2025-11-01",
+      "fold_end": "2025-11-30",
+      "status": "evaluated",
+      "train_core_rows": 14250,
+      "calibration_rows": 629,
+      "test_rows": 210
+    },
+    {
+      "fold_start": "2025-12-01",
+      "fold_end": "2025-12-31",
+      "status": "evaluated",
+      "train_core_rows": 14459,
+      "calibration_rows": 630,
+      "test_rows": 210
+    }
+  ],
+  "base_feature_count": 48,
+  "enhanced_feature_count": 75,
+  "enhanced_features": [
+    "temp_slope_since_sunrise",
+    "temp_trend_last_2_metars",
+    "latest_2_metar_temp_change_c",
+    "cloud_cover_proxy_latest",
+    "cloud_cover_proxy_trend_last_2_metars",
+    "cloud_cover_proxy_trend_2h",
+    "lowest_ceiling_ft_latest",
+    "ceiling_trend_last_2_metars",
+    "ceiling_trend_2h",
+    "dewpoint_depression_latest",
+    "dewpoint_depression_trend_2h",
+    "pressure_tendency_1h",
+    "pressure_tendency_3h",
+    "wind_dir_shift_2h_deg",
+    "wind_speed_trend_2h",
+    "wind_direction_latest_deg",
+    "wind_speed_latest_kt",
+    "rain_started_after_current_max",
+    "cb_tcu_appeared_after_current_max",
+    "showers_appeared_after_current_max",
+    "fog_or_br_recent_metar",
+    "cavok_trend_last_2_metars",
+    "metar_minutes_since_current_max",
+    "metar_hours_since_sunrise",
+    "temp_drop_after_rain_start_c",
+    "temp_drop_after_cb_tcu_c",
+    "wind_direction_valid_count_2h"
+  ],
+  "summary": [
+    {
+      "model_variant": "base_intraday_ml",
+      "rows": 1063,
+      "distinct_days": 152,
+      "mae_expected": 1.6574266413,
+      "rmse_expected": 2.3547932902,
+      "bias_expected": 0.3470203783,
+      "mean_nll": 4.9549900144,
+      "mean_crps": 0.0535625316,
+      "brier_peak_already_passed": 0.0968210151,
+      "brier_upside_ge_1c": 0.0990926654,
+      "brier_upside_ge_2c": 0.0982009527,
+      "brier_upside_ge_3c": 0.0998395733,
+      "coverage_80": 0.6434619003,
+      "mean_false_upside_probability": 0.3690229028
+    },
+    {
+      "model_variant": "enhanced_intraday_ml",
+      "rows": 1063,
+      "distinct_days": 152,
+      "mae_expected": 1.6196521165,
+      "rmse_expected": 2.281483592,
+      "bias_expected": 0.3803709195,
+      "mean_nll": 4.8234587222,
+      "mean_crps": 0.0518241747,
+      "brier_peak_already_passed": 0.0951108299,
+      "brier_upside_ge_1c": 0.0977321011,
+      "brier_upside_ge_2c": 0.0934907858,
+      "brier_upside_ge_3c": 0.0947387533,
+      "coverage_80": 0.6331138288,
+      "mean_false_upside_probability": 0.3688345961
+    }
+  ],
+  "recommendation": {
+    "decision": "promote_to_main_model",
+    "checks": {
+      "mae_improves_at_least_0_02c": true,
+      "nll_not_materially_worse": true,
+      "crps_not_materially_worse": true,
+      "false_upside_not_worse_by_3pp": true
+    },
+    "enhanced_minus_base_mae": -0.03777452476596732,
+    "enhanced_minus_base_nll": -0.1315312921989582,
+    "enhanced_minus_base_crps": -0.0017383568104818031,
+    "enhanced_minus_base_false_upside_probability": -0.00018830675706504874
+  }
+}

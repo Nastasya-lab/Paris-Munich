@@ -8,9 +8,10 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 
+from weather_tmax_bot.features.metar_upside_dataset import ENHANCED_METAR_INTRADAY_FEATURES
 from weather_tmax_bot.models.distribution import TmaxDistribution
 
-DEFAULT_INTRADAY_ML_FEATURES = [
+CORE_INTRADAY_ML_FEATURES = [
     "issue_hour_utc",
     "issue_hour_continuous_utc",
     "lead_to_local_day_end_hours",
@@ -60,6 +61,8 @@ DEFAULT_INTRADAY_ML_FEATURES = [
     "model_dewpoint_mean",
     "model_relative_humidity_mean",
 ]
+
+DEFAULT_INTRADAY_ML_FEATURES = list(CORE_INTRADAY_ML_FEATURES) + list(ENHANCED_METAR_INTRADAY_FEATURES)
 
 
 @dataclass
@@ -281,6 +284,7 @@ class IntradayMLUpsideModel:
 
     max_upside_c: int = 20
     min_rows: int = 300
+    max_iter: int = 80
     feature_columns: list[str] = field(default_factory=lambda: list(DEFAULT_INTRADAY_ML_FEATURES))
     imputer: SimpleImputer = field(default_factory=lambda: SimpleImputer(strategy="median", keep_empty_features=True))
     threshold_models: dict[int, HistGradientBoostingClassifier | None] = field(default_factory=dict)
@@ -305,7 +309,7 @@ class IntradayMLUpsideModel:
                 continue
             model = HistGradientBoostingClassifier(
                 learning_rate=0.06,
-                max_iter=80,
+                max_iter=self.max_iter,
                 max_leaf_nodes=15,
                 l2_regularization=1.0,
                 random_state=42,

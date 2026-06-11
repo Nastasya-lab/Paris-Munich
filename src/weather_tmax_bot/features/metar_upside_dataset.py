@@ -9,6 +9,37 @@ import pandas as pd
 from weather_tmax_bot.utils.time import local_day_bounds_utc
 
 
+ENHANCED_METAR_INTRADAY_FEATURES = [
+    "temp_slope_since_sunrise",
+    "temp_trend_last_2_metars",
+    "latest_2_metar_temp_change_c",
+    "cloud_cover_proxy_latest",
+    "cloud_cover_proxy_trend_last_2_metars",
+    "cloud_cover_proxy_trend_2h",
+    "lowest_ceiling_ft_latest",
+    "ceiling_trend_last_2_metars",
+    "ceiling_trend_2h",
+    "dewpoint_depression_latest",
+    "dewpoint_depression_trend_2h",
+    "pressure_tendency_1h",
+    "pressure_tendency_3h",
+    "wind_dir_shift_2h_deg",
+    "wind_speed_trend_2h",
+    "wind_direction_latest_deg",
+    "wind_speed_latest_kt",
+    "rain_started_after_current_max",
+    "cb_tcu_appeared_after_current_max",
+    "showers_appeared_after_current_max",
+    "fog_or_br_recent_metar",
+    "cavok_trend_last_2_metars",
+    "metar_minutes_since_current_max",
+    "metar_hours_since_sunrise",
+    "temp_drop_after_rain_start_c",
+    "temp_drop_after_cb_tcu_c",
+    "wind_direction_valid_count_2h",
+]
+
+
 def build_metar_remaining_upside_dataset(
     metar: pd.DataFrame,
     target: pd.DataFrame,
@@ -146,6 +177,48 @@ def build_current_metar_upside_features(
     }
     row.update(_rain_features(_prepare_rain(rain_6min), day_start, issue_utc))
     return row
+
+
+def build_asof_enhanced_metar_features(
+    metar: pd.DataFrame,
+    *,
+    issue_time_utc: datetime | pd.Timestamp,
+    target_date_local: date,
+    timezone_name: str,
+) -> dict:
+    """Compute same-day enhanced METAR features using only as-of records."""
+    metar_df = _prepare_metar(metar)
+    issue_utc = (
+        pd.Timestamp(issue_time_utc).tz_convert("UTC")
+        if pd.Timestamp(issue_time_utc).tzinfo
+        else pd.Timestamp(issue_time_utc, tz="UTC")
+    )
+    day_start, day_end = local_day_bounds_utc(target_date_local, timezone_name)
+    day_metar = metar_df[
+        (metar_df["observation_time_utc"] >= pd.Timestamp(day_start))
+        & (metar_df["observation_time_utc"] < pd.Timestamp(day_end))
+        & (metar_df["knowledge_time_utc"] <= issue_utc)
+    ].copy()
+    if day_metar.empty:
+        return empty_enhanced_metar_features()
+    day_metar = day_metar.reset_index(drop=True)
+    latest = day_metar.iloc[-1]
+    current_max_idx = day_metar["temperature_c"].idxmax()
+    after_current_max = day_metar.loc[day_metar.index >= current_max_idx].copy()
+    return _enhanced_metar_features(day_metar, after_current_max, latest, issue_utc, day_start)
+
+
+def empty_enhanced_metar_features() -> dict:
+    boolean_columns = {
+        "rain_started_after_current_max",
+        "cb_tcu_appeared_after_current_max",
+        "showers_appeared_after_current_max",
+        "fog_or_br_recent_metar",
+    }
+    return {
+        column: (False if column in boolean_columns else float("nan"))
+        for column in ENHANCED_METAR_INTRADAY_FEATURES
+    }
 
 
 def _prepare_metar(metar: pd.DataFrame) -> pd.DataFrame:

@@ -5,6 +5,7 @@ from datetime import date, datetime
 import numpy as np
 import pandas as pd
 
+from weather_tmax_bot.features.metar_upside_dataset import build_asof_enhanced_metar_features
 from weather_tmax_bot.utils.time import ensure_utc
 from weather_tmax_bot.utils.time import local_day_bounds_utc
 
@@ -32,7 +33,7 @@ def build_metar_features(
     direction = last.get("wind_direction_deg")
     speed = last.get("wind_speed_kt")
     rad = np.deg2rad(direction) if pd.notna(direction) else np.nan
-    return {
+    features = {
         "metar_missing": False,
         "last_metar_temp_c": last.get("temperature_c"),
         "last_metar_dewpoint_c": last.get("dewpoint_c"),
@@ -56,6 +57,16 @@ def build_metar_features(
         "max_metar_knowledge_time_utc": last.get("knowledge_time_utc"),
         "latest_metar_source_id": last.get("source_id"),
     }
+    if target_date_local is not None:
+        features.update(
+            build_asof_enhanced_metar_features(
+                df,
+                issue_time_utc=issue,
+                target_date_local=target_date_local,
+                timezone_name=timezone_name,
+            )
+        )
+    return features
 
 
 def _trend(df: pd.DataFrame, col: str) -> float:
