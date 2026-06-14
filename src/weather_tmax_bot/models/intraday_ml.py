@@ -9,6 +9,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 
 from weather_tmax_bot.features.metar_upside_dataset import ENHANCED_METAR_INTRADAY_FEATURES
+from weather_tmax_bot.features.spatial_metar import EDDM_SPATIAL_STATIONS, spatial_feature_columns
 from weather_tmax_bot.models.distribution import TmaxDistribution
 
 CORE_INTRADAY_ML_FEATURES = [
@@ -62,7 +63,13 @@ CORE_INTRADAY_ML_FEATURES = [
     "model_relative_humidity_mean",
 ]
 
-DEFAULT_INTRADAY_ML_FEATURES = list(CORE_INTRADAY_ML_FEATURES) + list(ENHANCED_METAR_INTRADAY_FEATURES)
+EDDM_SPATIAL_METAR_FEATURES = spatial_feature_columns(EDDM_SPATIAL_STATIONS)
+
+DEFAULT_INTRADAY_ML_FEATURES = (
+    list(CORE_INTRADAY_ML_FEATURES)
+    + list(ENHANCED_METAR_INTRADAY_FEATURES)
+    + list(EDDM_SPATIAL_METAR_FEATURES)
+)
 
 
 @dataclass
@@ -324,15 +331,30 @@ class IntradayMLUpsideModel:
         if not self.fitted:
             raise ValueError("intraday ML model is not fitted")
         frame = pd.DataFrame([dict(feature_row)])
+        survival = self.predict_upside_survival_frame(frame)
+        return {threshold: float(survival.iloc[0][threshold]) for threshold in range(1, self.max_upside_c + 1)}
+
+    def predict_upside_survival_frame(self, features: pd.DataFrame) -> pd.DataFrame:
+        if not self.fitted:
+            raise ValueError("intraday ML model is not fitted")
+        frame = features.copy()
         X = self.imputer.transform(_numeric_feature_frame(frame, self.feature_columns))
         probabilities = []
         for threshold in range(1, self.max_upside_c + 1):
             model = self.threshold_models.get(threshold)
-            probability = self.constant_probabilities.get(threshold, 0.0) if model is None else float(model.predict_proba(X)[0, 1])
+            if model is None:
+                probability = np.full(len(frame), self.constant_probabilities.get(threshold, 0.0), dtype=float)
+            else:
+                probability = model.predict_proba(X)[:, 1].astype(float)
             probabilities.append(probability)
         # Ordinal survival probabilities must never rise with the threshold.
-        monotonic = np.minimum.accumulate(np.clip(probabilities, 0.0, 1.0))
-        return {threshold: float(monotonic[threshold - 1]) for threshold in range(1, self.max_upside_c + 1)}
+        matrix = np.column_stack(probabilities)
+        monotonic = np.minimum.accumulate(np.clip(matrix, 0.0, 1.0), axis=1)
+        return pd.DataFrame(
+            monotonic,
+            index=frame.index,
+            columns=list(range(1, self.max_upside_c + 1)),
+        )
 
     def predict_distribution(self, feature_row: dict | pd.Series) -> tuple[TmaxDistribution, dict]:
         observed_max = _required_float(feature_row, "observed_max_so_far_from_metar")
@@ -452,14 +474,14 @@ def _optional_float(row: dict | pd.Series, key: str, default: float | None = Non
 
 
 def _numeric_feature_frame(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-    out = pd.DataFrame(index=frame.index)
+    data = {}
     for column in columns:
         values = frame[column] if column in frame.columns else pd.Series(np.nan, index=frame.index)
         if values.dtype == bool:
-            out[column] = values.astype(float)
+            data[column] = values.astype(float)
         else:
-            out[column] = pd.to_numeric(values, errors="coerce")
-    return out
+            data[column] = pd.to_numeric(values, errors="coerce")
+    return pd.DataFrame(data, index=frame.index)
 
 
 def _required_float(row: dict | pd.Series, key: str) -> float:

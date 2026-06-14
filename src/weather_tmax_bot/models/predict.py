@@ -7,6 +7,7 @@ import joblib
 import pandas as pd
 
 from weather_tmax_bot.features.build_features import build_feature_row
+from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT
 from weather_tmax_bot.models.baselines import ClimatologyBaseline
 from weather_tmax_bot.models.disagreement import assess_model_disagreement
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
@@ -43,6 +44,7 @@ def predict_best_available(
     resolved_model_path = active["model_path"]
     if resolved_model_path is not None and Path(resolved_model_path).exists():
         metar = _load_metar_for_issue(airport, target_date, issue_time_utc)
+        spatial_metars = _load_spatial_metars_for_issue(airport, target_date, issue_time_utc)
         taf = _load_taf_for_issue(airport, issue_time_utc)
         nwp = _load_nwp_for_issue(target_date, issue_time_utc)
         feature_row = build_feature_row(
@@ -50,6 +52,7 @@ def predict_best_available(
             issue_time_utc=issue_time_utc,
             target_date_local=target_date,
             metar=metar,
+            spatial_metars=spatial_metars,
             taf=taf,
             nwp=nwp,
         )
@@ -318,6 +321,17 @@ def _load_metar_for_issue(airport: str, target_date: date, issue_time_utc: datet
     metar = pd.concat(frames, ignore_index=True)
     times = pd.to_datetime(metar["observation_time_utc"], utc=True)
     return metar[(times >= context_start) & (times <= context_end)].copy()
+
+
+def _load_spatial_metars_for_issue(airport: str, target_date: date, issue_time_utc: datetime) -> dict[str, pd.DataFrame]:
+    stations = SPATIAL_STATIONS_BY_AIRPORT.get(airport.upper(), ())
+    if not stations:
+        return {}
+    return {
+        station: frame
+        for station in stations
+        if not (frame := _load_metar_for_issue(station, target_date, issue_time_utc)).empty
+    }
 
 
 def _load_metar_context(path: str | Path, context_start: pd.Timestamp, context_end: pd.Timestamp) -> pd.DataFrame:

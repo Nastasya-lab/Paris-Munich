@@ -10,7 +10,8 @@ import pandas as pd
 
 from weather_tmax_bot.notifications.telegram import format_metar_event_message, notify_if_configured
 from weather_tmax_bot.operations.predict_run import run_prediction
-from weather_tmax_bot.operations.refresh import refresh_awc_live
+from weather_tmax_bot.operations.refresh import refresh_awc_live, refresh_spatial_awc_live
+from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT
 from weather_tmax_bot.operations.run_report import operational_prediction_payload
 
 
@@ -43,6 +44,8 @@ def run_metar_event_cycle(
     forecast_log_path = Path(os.getenv("WEATHER_TMAX_FORECAST_LOG_PATH", str(forecast_log_path)))
     before_metar = _latest_metar_time(root, airport)
     refresh_summary = {"airport": airport, "target_date_local": target_date_local.isoformat(), "sources": {"awc": refresh_awc_live(airport, root)}}
+    if SPATIAL_STATIONS_BY_AIRPORT.get(airport.upper()):
+        refresh_summary["sources"]["spatial_awc"] = refresh_spatial_awc_live(airport=airport, root=root)
     after_metar = _latest_metar_time(root, airport)
     latest_metar_record = _latest_metar_record(root, airport)
     if after_metar is None:

@@ -9,6 +9,11 @@ from weather_tmax_bot.utils.time import local_day_bounds_utc
 
 
 DEFAULT_SPATIAL_STATIONS = ["LFPG", "LFPO"]
+EDDM_SPATIAL_STATIONS = ["EDMO", "EDMA", "ETSI", "ETSL"]
+SPATIAL_STATIONS_BY_AIRPORT = {
+    "EDDM": EDDM_SPATIAL_STATIONS,
+    "LFPB": DEFAULT_SPATIAL_STATIONS,
+}
 
 
 def spatial_feature_columns(stations: list[str] | tuple[str, ...] = DEFAULT_SPATIAL_STATIONS) -> list[str]:
@@ -46,6 +51,8 @@ def spatial_feature_columns(stations: list[str] | tuple[str, ...] = DEFAULT_SPAT
             "spatial_current_max_max_c",
             "spatial_current_max_min_c",
             "spatial_current_max_spread_c",
+            "spatial_latest_minus_base_latest_mean_c",
+            "spatial_max_minus_base_current_max_mean_c",
             "spatial_latest_minus_lfpb_latest_mean_c",
             "spatial_max_minus_lfpb_current_max_mean_c",
             "spatial_any_neighbor_above_lfpb_latest",
@@ -70,8 +77,8 @@ def build_spatial_metar_features(
     max_values: list[float] = []
     available = 0
     max_knowledge_time = _optional_timestamp(base_row.get("max_feature_knowledge_time_utc")) or issue
-    lfpb_latest = _optional_float(base_row.get("latest_metar_temp_c"))
-    lfpb_current_max = _optional_float(base_row.get("current_metar_max_c"))
+    base_latest = _first_optional_float(base_row, ["latest_metar_temp_c", "last_metar_temp_c"])
+    base_current_max = _first_optional_float(base_row, ["current_metar_max_c", "observed_max_so_far_from_metar"])
 
     for station in stations:
         prefix = f"spatial_{station.lower()}"
@@ -90,8 +97,10 @@ def build_spatial_metar_features(
             max_values.append(station_max)
         if station_knowledge is not None:
             max_knowledge_time = max(max_knowledge_time, station_knowledge)
-        features[f"{prefix}_latest_minus_lfpb_latest_c"] = _maybe_diff(station_latest, lfpb_latest)
-        features[f"{prefix}_max_minus_lfpb_current_max_c"] = _maybe_diff(station_max, lfpb_current_max)
+        features[f"{prefix}_latest_minus_base_latest_c"] = _maybe_diff(station_latest, base_latest)
+        features[f"{prefix}_max_minus_base_current_max_c"] = _maybe_diff(station_max, base_current_max)
+        features[f"{prefix}_latest_minus_lfpb_latest_c"] = features[f"{prefix}_latest_minus_base_latest_c"]
+        features[f"{prefix}_max_minus_lfpb_current_max_c"] = features[f"{prefix}_max_minus_base_current_max_c"]
 
     features["spatial_available_station_count"] = available
     features["spatial_latest_temp_mean_c"] = _mean_or_nan(latest_values)
@@ -102,11 +111,13 @@ def build_spatial_metar_features(
     features["spatial_current_max_max_c"] = _max_or_nan(max_values)
     features["spatial_current_max_min_c"] = _min_or_nan(max_values)
     features["spatial_current_max_spread_c"] = _spread_or_nan(max_values)
-    features["spatial_latest_minus_lfpb_latest_mean_c"] = _maybe_diff(features["spatial_latest_temp_mean_c"], lfpb_latest)
-    features["spatial_max_minus_lfpb_current_max_mean_c"] = _maybe_diff(features["spatial_current_max_mean_c"], lfpb_current_max)
-    features["spatial_any_neighbor_above_lfpb_latest"] = bool(lfpb_latest is not None and any(value > lfpb_latest for value in latest_values))
+    features["spatial_latest_minus_base_latest_mean_c"] = _maybe_diff(features["spatial_latest_temp_mean_c"], base_latest)
+    features["spatial_max_minus_base_current_max_mean_c"] = _maybe_diff(features["spatial_current_max_mean_c"], base_current_max)
+    features["spatial_latest_minus_lfpb_latest_mean_c"] = features["spatial_latest_minus_base_latest_mean_c"]
+    features["spatial_max_minus_lfpb_current_max_mean_c"] = features["spatial_max_minus_base_current_max_mean_c"]
+    features["spatial_any_neighbor_above_lfpb_latest"] = bool(base_latest is not None and any(value > base_latest for value in latest_values))
     features["spatial_any_neighbor_above_lfpb_current_max"] = bool(
-        lfpb_current_max is not None and any(value > lfpb_current_max for value in max_values)
+        base_current_max is not None and any(value > base_current_max for value in max_values)
     )
     features["spatial_max_feature_knowledge_time_utc"] = max_knowledge_time.isoformat()
     features["spatial_leakage_check_passed"] = bool(max_knowledge_time <= issue)
@@ -121,10 +132,14 @@ def add_spatial_metar_features_to_frame(
     stations: list[str] | tuple[str, ...] = DEFAULT_SPATIAL_STATIONS,
 ) -> pd.DataFrame:
     out = frame.copy()
+    station_day_metars = _station_day_metar_map(neighbor_metars, timezone_name=timezone_name, stations=stations)
     rows = [
         build_spatial_metar_features(
             row,
-            neighbor_metars,
+            {
+                station: station_day_metars.get(station, {}).get(str(row["target_date_local"]), pd.DataFrame())
+                for station in stations
+            },
             target_date_local=pd.Timestamp(str(row["target_date_local"])).date(),
             issue_time_utc=row["issue_time_utc"],
             timezone_name=timezone_name,
@@ -136,6 +151,27 @@ def add_spatial_metar_features_to_frame(
     out = pd.concat([out, spatial], axis=1)
     out["max_feature_knowledge_time_utc"] = out["spatial_max_feature_knowledge_time_utc"]
     out["leakage_check_passed"] = out["leakage_check_passed"].fillna(False).astype(bool) & out["spatial_leakage_check_passed"].fillna(False).astype(bool)
+    return out
+
+
+def _station_day_metar_map(
+    station_metars: dict[str, pd.DataFrame],
+    *,
+    timezone_name: str,
+    stations: list[str] | tuple[str, ...],
+) -> dict[str, dict[str, pd.DataFrame]]:
+    out: dict[str, dict[str, pd.DataFrame]] = {}
+    for station in stations:
+        df = _prepare_metar(station_metars.get(station, pd.DataFrame()))
+        if df.empty:
+            out[station] = {}
+            continue
+        df = df.copy()
+        df["_target_date_local"] = df["observation_time_utc"].dt.tz_convert(timezone_name).dt.date.astype(str)
+        out[station] = {
+            str(day): group.drop(columns=["_target_date_local"]).copy()
+            for day, group in df.groupby("_target_date_local", sort=False)
+        }
     return out
 
 
@@ -263,6 +299,14 @@ def _optional_float(value) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _first_optional_float(row: dict | pd.Series, keys: list[str]) -> float | None:
+    for key in keys:
+        value = _optional_float(row.get(key))
+        if value is not None:
+            return value
+    return None
 
 
 def _finite_or_nan(value) -> float:

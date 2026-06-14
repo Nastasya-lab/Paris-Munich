@@ -12,6 +12,7 @@ from weather_tmax_bot.data.storage import write_parquet
 from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, mae, nll_integer_bin, rmse
 from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.models.intraday_ml import (
+    EDDM_SPATIAL_METAR_FEATURES,
     ENHANCED_METAR_INTRADAY_FEATURES,
     IntradayMLSurvivalCalibrator,
     IntradayMLUpsideModel,
@@ -23,11 +24,14 @@ from weather_tmax_bot.utils.hashing import stable_hash
 VERSION = "intraday_ml_core_challenger_v1"
 MODEL_PATH = Path("data/models") / f"{VERSION}.joblib"
 METADATA_PATH = Path("data/models") / f"{VERSION}.metadata.json"
-MODEL_MAX_ITER = 50
+MODEL_MAX_ITER = 30
+MODEL_MAX_UPSIDE_C = 12
 
 
 def main() -> None:
-    source = Path("data/processed/intraday_ml_dataset_enhanced.parquet")
+    source = Path("data/processed/intraday_ml_dataset_enhanced_spatial.parquet")
+    if not source.exists():
+        source = Path("data/processed/intraday_ml_dataset_enhanced.parquet")
     if not source.exists():
         source = Path("data/processed/intraday_ml_dataset.parquet")
     if source.exists():
@@ -41,9 +45,9 @@ def main() -> None:
     by_hour = _group_summary(scored, ["model_variant", "issue_hour_utc"])
     by_fold = _group_summary(scored, ["model_variant", "fold_start"])
     calibration_rows, calibration_folds = _build_oof_calibration_rows(usable)
-    final_calibrator = IntradayMLSurvivalCalibrator().fit(calibration_rows)
+    final_calibrator = IntradayMLSurvivalCalibrator(max_upside_c=MODEL_MAX_UPSIDE_C).fit(calibration_rows)
     calibration_deployment = _calibration_deployment_decision(summary)
-    model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER).fit(usable)
+    model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER, max_upside_c=MODEL_MAX_UPSIDE_C).fit(usable)
     model.calibrator = final_calibrator if calibration_deployment["accepted"] else None
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
@@ -59,10 +63,13 @@ def main() -> None:
         "calibration_metadata": final_calibrator.to_metadata(),
         "calibration_deployment": calibration_deployment,
         "calibration_folds": calibration_folds,
-        "feature_set_version": "intraday_ml_core.enhanced_metar.v2",
+        "feature_set_version": "intraday_ml_core.enhanced_metar.spatial_edmo_edma_etsi_etsl.v3",
         "feature_columns": model.feature_columns,
         "enhanced_intraday_feature_columns": ENHANCED_METAR_INTRADAY_FEATURES,
+        "spatial_feature_columns": EDDM_SPATIAL_METAR_FEATURES,
+        "spatial_neighbor_stations": ["EDMO", "EDMA", "ETSI", "ETSL"],
         "max_iter": MODEL_MAX_ITER,
+        "max_upside_c": MODEL_MAX_UPSIDE_C,
         "data_snapshot_hash": stable_hash({"rows": len(usable), "target_sum": float(usable["tmax_c"].sum())}),
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "rolling_backtest": json.loads(summary.to_json(orient="records")),
@@ -71,6 +78,7 @@ def main() -> None:
             "Historical TAF archive is empty, so TAF values degrade to missing flags during training.",
             "ICON-D2 features are optional because honest historical NWP overlap starts in late May 2025.",
             "Calibration is learned from historical out-of-fold predictions and deployed only if it passes the gate.",
+            "EDDM spatial METAR neighbors are used as as-of features when available; missing live neighbors degrade through the model imputer.",
             "This artifact is promoted only through late-day phase arbitration, not as the full-day base model.",
         ],
     }
@@ -107,17 +115,17 @@ def _rolling_backtest(dataset: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
                 "test_rows": len(test),
             })
             continue
-        model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER).fit(train_core)
+        model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER, max_upside_c=MODEL_MAX_UPSIDE_C).fit(train_core)
         calibrator = IntradayMLSurvivalCalibrator(max_upside_c=model.max_upside_c).fit(
             _survival_calibration_rows(model, calibration)
         )
-        for _, row in test.iterrows():
-            dist, details = model.predict_distribution(row.to_dict())
+        raw_predictions = _predict_distributions_frame(model, test, calibrator=None)
+        calibrated_predictions = _predict_distributions_frame(model, test, calibrator=calibrator)
+        for (_, row), raw_prediction, calibrated_prediction in zip(test.iterrows(), raw_predictions, calibrated_predictions):
             baseline_dist, baseline_details = _empirical_upside_distribution(train, row)
+            dist, details = raw_prediction
             rows.append(_score("intraday_ml_core_challenger_v1_raw", row, dist, details, fold_start))
-            model.calibrator = calibrator
-            calibrated_dist, calibrated_details = model.predict_distribution(row.to_dict())
-            model.calibrator = None
+            calibrated_dist, calibrated_details = calibrated_prediction
             rows.append(_score("intraday_ml_core_challenger_v1", row, calibrated_dist, calibrated_details, fold_start))
             rows.append(_score("empirical_hourly_upside_baseline", row, baseline_dist, baseline_details, fold_start))
         folds.append({
@@ -151,7 +159,7 @@ def _build_oof_calibration_rows(dataset: pd.DataFrame) -> tuple[pd.DataFrame, li
                 "holdout_rows": len(holdout),
             })
             continue
-        model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER).fit(train)
+        model = IntradayMLUpsideModel(max_iter=MODEL_MAX_ITER, max_upside_c=MODEL_MAX_UPSIDE_C).fit(train)
         frame = _survival_calibration_rows(model, holdout)
         rows.append(frame)
         folds.append({
@@ -168,8 +176,9 @@ def _build_oof_calibration_rows(dataset: pd.DataFrame) -> tuple[pd.DataFrame, li
 
 def _survival_calibration_rows(model: IntradayMLUpsideModel, frame: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for _, row in frame.iterrows():
-        survival = model.predict_upside_survival(row.to_dict())
+    survival_frame = model.predict_upside_survival_frame(frame)
+    for idx, row in frame.iterrows():
+        survival = survival_frame.loc[idx]
         remaining_upside = float(row["remaining_upside_c"])
         out = {
             "target_date_local": row["target_date_local"].isoformat(),
@@ -179,10 +188,49 @@ def _survival_calibration_rows(model: IntradayMLUpsideModel, frame: pd.DataFrame
         }
         out.update(infer_intraday_ml_context(row))
         for threshold in range(1, model.max_upside_c + 1):
-            out[f"raw_probability_upside_ge_{threshold}c"] = float(survival[threshold])
+            out[f"raw_probability_upside_ge_{threshold}c"] = float(survival.loc[threshold])
             out[f"actual_upside_ge_{threshold}c"] = float(remaining_upside >= threshold)
         rows.append(out)
     return pd.DataFrame(rows)
+
+
+def _predict_distributions_frame(
+    model: IntradayMLUpsideModel,
+    frame: pd.DataFrame,
+    *,
+    calibrator: IntradayMLSurvivalCalibrator | None,
+) -> list[tuple[TmaxDistribution, dict]]:
+    survival_frame = model.predict_upside_survival_frame(frame)
+    predictions = []
+    for idx, row in frame.iterrows():
+        raw_survival = {
+            threshold: float(survival_frame.loc[idx, threshold])
+            for threshold in range(1, model.max_upside_c + 1)
+        }
+        survival = (
+            calibrator.transform(
+                raw_survival,
+                issue_hour_utc=row.get("issue_hour_utc"),
+                context=infer_intraday_ml_context(row),
+            )
+            if calibrator is not None
+            else raw_survival
+        )
+        probs = _survival_to_probabilities(survival, model.max_upside_c)
+        observed_max = float(row["observed_max_so_far_from_metar"])
+        bins = np.rint(observed_max + np.arange(model.max_upside_c + 1)).astype(int)
+        predictions.append(
+            (
+                TmaxDistribution(bins, probs),
+                {
+                    "probability_peak_already_passed": float(probs[0]),
+                    "probability_upside_ge_1c": survival[1],
+                    "probability_upside_ge_2c": survival[2],
+                    "probability_upside_ge_3c": survival[3],
+                },
+            )
+        )
+    return predictions
 
 
 def _score(model_variant: str, row: pd.Series, dist: TmaxDistribution, details: dict, fold_start) -> dict:
@@ -223,6 +271,15 @@ def _empirical_upside_distribution(train: pd.DataFrame, row: pd.Series) -> tuple
         "probability_upside_ge_2c": float((upside >= 2).mean()),
         "probability_upside_ge_3c": float((upside >= 3).mean()),
     }
+
+
+def _survival_to_probabilities(survival: dict[int, float], max_upside_c: int) -> np.ndarray:
+    survival_values = np.array([survival[threshold] for threshold in range(1, max_upside_c + 1)], dtype=float)
+    probs = np.empty(max_upside_c + 1, dtype=float)
+    probs[0] = 1.0 - survival_values[0]
+    probs[1:-1] = survival_values[:-1] - survival_values[1:]
+    probs[-1] = survival_values[-1]
+    return np.clip(probs, 0.0, 1.0)
 
 
 def _summary(scored: pd.DataFrame) -> dict:

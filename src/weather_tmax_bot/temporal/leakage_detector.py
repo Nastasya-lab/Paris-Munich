@@ -23,7 +23,18 @@ class LeakageDetector:
         if present_targets:
             raise LeakageError(f"target column leaked into features: {sorted(present_targets)}")
 
-        for col in ("knowledge_time_utc", "observation_time_utc", "taf_issue_time_utc", "nwp_availability_time_utc"):
+        temporal_columns = {
+            "knowledge_time_utc",
+            "observation_time_utc",
+            "taf_issue_time_utc",
+            "nwp_availability_time_utc",
+        }
+        temporal_columns.update(
+            col
+            for col in features.columns
+            if col.endswith("knowledge_time_utc") or col.endswith("availability_time_utc")
+        )
+        for col in sorted(temporal_columns):
             if col in features.columns and not features.empty:
                 values = pd.to_datetime(features[col], utc=True, errors="coerce").dropna()
                 if not values.empty and values.max().to_pydatetime() > issue_time_utc:
@@ -35,9 +46,13 @@ class LeakageDetector:
                 raise LeakageError("feature rows contain a different local target day")
 
         max_knowledge = None
-        if "knowledge_time_utc" in features.columns and not features.empty:
-            values = pd.to_datetime(features["knowledge_time_utc"], utc=True, errors="coerce").dropna()
-            max_knowledge = None if values.empty else values.max().to_pydatetime()
+        knowledge_columns = [col for col in features.columns if col.endswith("knowledge_time_utc")]
+        for col in knowledge_columns:
+            values = pd.to_datetime(features[col], utc=True, errors="coerce").dropna()
+            if values.empty:
+                continue
+            value = values.max().to_pydatetime()
+            max_knowledge = value if max_knowledge is None else max(max_knowledge, value)
 
         return {
             "passed": True,

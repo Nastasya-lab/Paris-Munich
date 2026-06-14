@@ -9,6 +9,7 @@ from weather_tmax_bot.data.awc import AWCAdapter
 from weather_tmax_bot.data.nwp import NWPArchive
 from weather_tmax_bot.data.open_meteo import fetch_open_meteo_live_extract
 from weather_tmax_bot.data.storage import write_parquet
+from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT
 from weather_tmax_bot.temporal.freshness_gate import evaluate_freshness_gate
 
 
@@ -27,6 +28,9 @@ def refresh_operational_data(
     if refresh_awc:
         awc = refresh_awc_live(airport=airport, root=root)
         summary["sources"]["awc"] = awc
+        spatial_stations = SPATIAL_STATIONS_BY_AIRPORT.get(airport.upper(), ())
+        if spatial_stations:
+            summary["sources"]["spatial_awc"] = refresh_spatial_awc_live(airport=airport, root=root)
     if refresh_nwp:
         nwp = refresh_open_meteo_nwp(airport=airport, target_date_local=target, root=root)
         summary["sources"]["open_meteo_nwp"] = nwp
@@ -49,6 +53,15 @@ def refresh_awc_live(airport: str = "EDDM", root: str | Path = ".") -> dict:
         "metar_archive_rows": _rows(metar_path),
         "taf_archive_rows": _rows(taf_path),
     }
+
+
+def refresh_spatial_awc_live(airport: str = "EDDM", root: str | Path = ".") -> dict:
+    root = Path(root)
+    stations = SPATIAL_STATIONS_BY_AIRPORT.get(airport.upper(), ())
+    refreshed = {}
+    for station in stations:
+        refreshed[station] = refresh_awc_live(airport=station, root=root)
+    return refreshed
 
 
 def refresh_open_meteo_nwp(airport: str, target_date_local: date, root: str | Path = ".") -> dict:
