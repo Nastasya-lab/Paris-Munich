@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from weather_tmax_bot.bot.forecast_log import log_forecast
 from weather_tmax_bot.bot.lineage import build_data_lineage
@@ -47,6 +47,7 @@ def run_prediction(
         "metadata": meta,
         "feature_snapshot": feature_snapshot,
         "data_lineage": lineage,
+        "issue_time_utc": issue_time_utc,
         "forecast_id": forecast_id,
         "warnings": warnings,
         "forecast_quality": quality,
@@ -63,6 +64,7 @@ def run_prediction_with_optional_refresh(
     refresh_nwp: bool = True,
     log: bool = True,
     mode: str = "cli",
+    allow_issue_time_advance: bool = False,
 ) -> dict:
     refresh_summary = None
     if auto_refresh:
@@ -72,6 +74,8 @@ def run_prediction_with_optional_refresh(
             refresh_awc=refresh_awc,
             refresh_nwp=refresh_nwp,
         )
+        if allow_issue_time_advance:
+            issue_time_utc = max(issue_time_utc, datetime.now(timezone.utc))
     result = run_prediction(
         airport=airport,
         target_date_local=target_date_local,

@@ -28,6 +28,7 @@ def run_operational_cycle(
     outcome_status_path: str | Path = "data/reports/forecast_outcome_status.parquet",
     reports_dir: str | Path = "data/reports",
     mode: str = "operational_cycle",
+    allow_issue_time_advance: bool = False,
 ) -> dict:
     prediction = run_prediction_with_optional_refresh(
         airport=airport,
@@ -38,11 +39,13 @@ def run_operational_cycle(
         refresh_nwp=refresh_nwp,
         log=log,
         mode=mode,
+        allow_issue_time_advance=allow_issue_time_advance,
     )
+    effective_issue = prediction.get("issue_time_utc", issue_time_utc)
     prediction_payload = operational_prediction_payload(
         airport=airport,
         target_date_local=target_date_local,
-        issue_time_utc=issue_time_utc,
+        issue_time_utc=effective_issue,
         result=prediction,
     )
     prediction_report_path = write_operational_prediction_report(prediction_payload, report_path)
@@ -56,7 +59,7 @@ def run_operational_cycle(
     return {
         "airport": airport,
         "target_date_local": target_date_local.isoformat(),
-        "issue_time_utc": issue_time_utc.isoformat(),
+        "issue_time_utc": effective_issue.isoformat(),
         "forecast_id": prediction["forecast_id"],
         "model_version": prediction["metadata"]["model_version"],
         "forecast": _forecast_summary(prediction_payload),

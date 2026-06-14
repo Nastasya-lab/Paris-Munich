@@ -32,11 +32,13 @@ def main(
         refresh_nwp=refresh_nwp,
         log=log,
         mode="operational_script",
+        allow_issue_time_advance=issue_time in (None, "now"),
     )
+    effective_issue = result.get("issue_time_utc", issue)
     payload = operational_prediction_payload(
         airport=airport,
         target_date_local=target,
-        issue_time_utc=issue,
+        issue_time_utc=effective_issue,
         result=result,
     )
     output = write_operational_prediction_report(payload, report_path)
@@ -44,7 +46,7 @@ def main(
         format_prediction(
             airport=airport,
             target_date=target,
-            issue_time_utc=issue,
+            issue_time_utc=effective_issue,
             dist=result["distribution"],
             model_version=result["metadata"]["model_version"],
             data_lineage=result["data_lineage"],

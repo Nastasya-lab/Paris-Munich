@@ -16,11 +16,23 @@ HOURLY_VARIABLES = [
     "dew_point_2m",
     "relative_humidity_2m",
     "cloud_cover",
+    "cloud_cover_low",
+    "cloud_cover_mid",
+    "cloud_cover_high",
     "precipitation",
+    "precipitation_probability",
+    "rain",
+    "showers",
+    "weather_code",
     "shortwave_radiation",
+    "direct_radiation",
+    "diffuse_radiation",
+    "sunshine_duration",
     "wind_speed_10m",
     "wind_gusts_10m",
     "surface_pressure",
+    "cape",
+    "lifted_index",
 ]
 
 
@@ -169,8 +181,29 @@ def _aggregate_open_meteo_day(
         "model_temp_at_14_local": _value_at_local_hour(day, "temperature_2m", target_date_local, timezone_name, 14),
         "model_temp_at_17_local": _value_at_local_hour(day, "temperature_2m", target_date_local, timezone_name, 17),
         "model_cloud_cover_mean": pd.to_numeric(day.get("cloud_cover"), errors="coerce").mean(),
+        "model_cloud_cover_max": pd.to_numeric(day.get("cloud_cover"), errors="coerce").max(),
+        "model_low_cloud_cover_mean": pd.to_numeric(day.get("cloud_cover_low"), errors="coerce").mean(),
+        "model_low_cloud_cover_max": pd.to_numeric(day.get("cloud_cover_low"), errors="coerce").max(),
+        "model_mid_cloud_cover_mean": pd.to_numeric(day.get("cloud_cover_mid"), errors="coerce").mean(),
+        "model_mid_cloud_cover_max": pd.to_numeric(day.get("cloud_cover_mid"), errors="coerce").max(),
+        "model_high_cloud_cover_mean": pd.to_numeric(day.get("cloud_cover_high"), errors="coerce").mean(),
+        "model_high_cloud_cover_max": pd.to_numeric(day.get("cloud_cover_high"), errors="coerce").max(),
         "model_precip_sum": pd.to_numeric(day.get("precipitation"), errors="coerce").sum(),
+        "model_precip_probability_max": pd.to_numeric(day.get("precipitation_probability"), errors="coerce").max(),
+        "model_precip_hours": _positive_hours(day, "precipitation"),
+        "model_rain_sum": pd.to_numeric(day.get("rain"), errors="coerce").sum(),
+        "model_rain_hours": _positive_hours(day, "rain"),
+        "model_showers_sum": pd.to_numeric(day.get("showers"), errors="coerce").sum(),
+        "model_showers_hours": _positive_hours(day, "showers"),
+        "model_weather_code_max": pd.to_numeric(day.get("weather_code"), errors="coerce").max(),
+        "model_has_thunderstorm_code": _has_weather_code(day, {95, 96, 99}),
+        "model_has_rain_code": _has_weather_code(day, set(range(51, 68)) | set(range(80, 83)) | {95, 96, 99}),
         "model_shortwave_radiation_sum": pd.to_numeric(day.get("shortwave_radiation"), errors="coerce").sum(),
+        "model_direct_radiation_sum": pd.to_numeric(day.get("direct_radiation"), errors="coerce").sum(),
+        "model_diffuse_radiation_sum": pd.to_numeric(day.get("diffuse_radiation"), errors="coerce").sum(),
+        "model_sunshine_duration_sum": pd.to_numeric(day.get("sunshine_duration"), errors="coerce").sum(),
+        "model_cape_max": pd.to_numeric(day.get("cape"), errors="coerce").max(),
+        "model_lifted_index_min": pd.to_numeric(day.get("lifted_index"), errors="coerce").min(),
         "model_wind_speed_max": pd.to_numeric(day.get("wind_speed_10m"), errors="coerce").max(),
         "model_gust_max": pd.to_numeric(day.get("wind_gusts_10m"), errors="coerce").max(),
         "model_pressure_mean": pd.to_numeric(day.get("surface_pressure"), errors="coerce").mean(),
@@ -178,8 +211,28 @@ def _aggregate_open_meteo_day(
         "model_relative_humidity_mean": pd.to_numeric(day.get("relative_humidity_2m"), errors="coerce").mean(),
         "model_future_temp_max_c": pd.to_numeric(remaining_day.get("temperature_2m"), errors="coerce").max(),
         "model_future_cloud_cover_mean": pd.to_numeric(remaining_day.get("cloud_cover"), errors="coerce").mean(),
+        "model_future_cloud_cover_max": pd.to_numeric(remaining_day.get("cloud_cover"), errors="coerce").max(),
+        "model_future_low_cloud_cover_mean": pd.to_numeric(remaining_day.get("cloud_cover_low"), errors="coerce").mean(),
+        "model_future_low_cloud_cover_max": pd.to_numeric(remaining_day.get("cloud_cover_low"), errors="coerce").max(),
+        "model_future_mid_cloud_cover_mean": pd.to_numeric(remaining_day.get("cloud_cover_mid"), errors="coerce").mean(),
+        "model_future_mid_cloud_cover_max": pd.to_numeric(remaining_day.get("cloud_cover_mid"), errors="coerce").max(),
+        "model_future_high_cloud_cover_mean": pd.to_numeric(remaining_day.get("cloud_cover_high"), errors="coerce").mean(),
+        "model_future_high_cloud_cover_max": pd.to_numeric(remaining_day.get("cloud_cover_high"), errors="coerce").max(),
         "model_future_precip_sum": pd.to_numeric(remaining_day.get("precipitation"), errors="coerce").sum(),
+        "model_future_precip_probability_max": pd.to_numeric(remaining_day.get("precipitation_probability"), errors="coerce").max(),
+        "model_future_precip_hours": _positive_hours(remaining_day, "precipitation"),
+        "model_future_rain_sum": pd.to_numeric(remaining_day.get("rain"), errors="coerce").sum(),
+        "model_future_rain_hours": _positive_hours(remaining_day, "rain"),
+        "model_future_showers_sum": pd.to_numeric(remaining_day.get("showers"), errors="coerce").sum(),
+        "model_future_showers_hours": _positive_hours(remaining_day, "showers"),
+        "model_future_has_thunderstorm_code": _has_weather_code(remaining_day, {95, 96, 99}),
+        "model_future_has_rain_code": _has_weather_code(remaining_day, set(range(51, 68)) | set(range(80, 83)) | {95, 96, 99}),
         "model_future_shortwave_radiation_sum": pd.to_numeric(remaining_day.get("shortwave_radiation"), errors="coerce").sum(),
+        "model_future_direct_radiation_sum": pd.to_numeric(remaining_day.get("direct_radiation"), errors="coerce").sum(),
+        "model_future_diffuse_radiation_sum": pd.to_numeric(remaining_day.get("diffuse_radiation"), errors="coerce").sum(),
+        "model_future_sunshine_duration_sum": pd.to_numeric(remaining_day.get("sunshine_duration"), errors="coerce").sum(),
+        "model_future_cape_max": pd.to_numeric(remaining_day.get("cape"), errors="coerce").max(),
+        "model_future_lifted_index_min": pd.to_numeric(remaining_day.get("lifted_index"), errors="coerce").min(),
         "model_future_wind_speed_max": pd.to_numeric(remaining_day.get("wind_speed_10m"), errors="coerce").max(),
         "model_future_gust_max": pd.to_numeric(remaining_day.get("wind_gusts_10m"), errors="coerce").max(),
         "nearest_gridpoint_value": pd.to_numeric(day.get("temperature_2m"), errors="coerce").max(),
@@ -202,5 +255,26 @@ def _aggregate_open_meteo_day(
 def _value_at_local_hour(day: pd.DataFrame, column: str, target_date: date, timezone_name: str, hour: int):
     local = day["valid_time_utc"].dt.tz_convert(timezone_name)
     mask = (local.dt.date == target_date) & (local.dt.hour == hour)
+    if column not in day.columns:
+        return None
     values = pd.to_numeric(day.loc[mask, column], errors="coerce")
     return None if values.empty else values.iloc[0]
+
+
+def _positive_hours(frame: pd.DataFrame, column: str) -> float:
+    if column not in frame.columns:
+        return 0.0
+    values = pd.to_numeric(frame[column], errors="coerce")
+    if values.empty:
+        return 0.0
+    return float((values.fillna(0.0) > 0.0).sum())
+
+
+def _has_weather_code(frame: pd.DataFrame, codes: set[int]) -> bool:
+    if "weather_code" not in frame.columns:
+        return False
+    values = pd.to_numeric(frame["weather_code"], errors="coerce")
+    if values.empty:
+        return False
+    observed = set(values.dropna().astype(int).tolist())
+    return bool(observed.intersection(codes))

@@ -35,6 +35,7 @@ def main(
         log=log,
         update_reports=update_reports,
         report_path=prediction_report_path,
+        allow_issue_time_advance=issue_time in (None, "now"),
     )
     output = Path(cycle_report_path)
     output.parent.mkdir(parents=True, exist_ok=True)

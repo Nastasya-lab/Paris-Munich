@@ -40,7 +40,9 @@ def predict(
         refresh_nwp=refresh_nwp,
         log=log,
         mode="cli",
+        allow_issue_time_advance=issue_time in (None, "now"),
     )
+    display_issue = result.get("issue_time_utc", issue)
     refresh_summary = result.get("refresh_summary")
     if refresh_summary:
         typer.echo(f"Refresh summary: {refresh_summary}")
@@ -48,7 +50,7 @@ def predict(
         format_prediction(
             airport=airport,
             target_date=target,
-            issue_time_utc=issue,
+            issue_time_utc=display_issue,
             dist=result["distribution"],
             model_version=result["metadata"]["model_version"],
             data_lineage=result["data_lineage"],

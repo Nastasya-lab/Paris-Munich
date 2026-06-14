@@ -60,7 +60,10 @@ def refresh_spatial_awc_live(airport: str = "EDDM", root: str | Path = ".") -> d
     stations = SPATIAL_STATIONS_BY_AIRPORT.get(airport.upper(), ())
     refreshed = {}
     for station in stations:
-        refreshed[station] = refresh_awc_live(airport=station, root=root)
+        try:
+            refreshed[station] = refresh_awc_live(airport=station, root=root)
+        except Exception as exc:
+            refreshed[station] = {"error": str(exc)}
     return refreshed
 
 

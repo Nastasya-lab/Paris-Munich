@@ -246,7 +246,7 @@ def _window(df: pd.DataFrame, issue_utc: pd.Timestamp, hours: float) -> pd.DataF
 
 
 def _trend(df: pd.DataFrame, column: str) -> float:
-    values = pd.to_numeric(df.get(column), errors="coerce").dropna()
+    values = _numeric_series(df, column).dropna()
     if len(values) < 2:
         return float("nan")
     return float(values.iloc[-1] - values.iloc[0])
@@ -262,9 +262,9 @@ def _enhanced_metar_features(
     last_2 = so_far.tail(2)
     day_since_sunrise = so_far[so_far["observation_time_utc"] >= pd.Timestamp(day_start_utc) + pd.Timedelta(hours=5)]
     cloud_proxy = so_far.apply(_cloud_cover_proxy, axis=1)
-    ceiling = pd.to_numeric(so_far.get("ceiling_ft"), errors="coerce")
-    dewpoint_depression = pd.to_numeric(so_far["temperature_c"], errors="coerce") - pd.to_numeric(so_far.get("dewpoint_c"), errors="coerce")
-    wind_direction = pd.to_numeric(so_far.get("wind_direction_deg"), errors="coerce")
+    ceiling = _numeric_series(so_far, "ceiling_ft")
+    dewpoint_depression = _numeric_series(so_far, "temperature_c") - _numeric_series(so_far, "dewpoint_c")
+    wind_direction = _numeric_series(so_far, "wind_direction_deg")
     return {
         "temp_slope_since_sunrise": _trend(day_since_sunrise, "temperature_c"),
         "temp_trend_last_2_metars": _trend(last_2, "temperature_c"),
@@ -308,6 +308,12 @@ def _series_trend(values: pd.Series) -> float:
     return float(clean.iloc[-1] - clean.iloc[0])
 
 
+def _numeric_series(df: pd.DataFrame, column: str) -> pd.Series:
+    if column not in df.columns:
+        return pd.Series(np.nan, index=df.index, dtype=float)
+    return pd.to_numeric(df[column], errors="coerce")
+
+
 def _cloud_cover_proxy(row: pd.Series) -> float:
     if bool(row.get("cavok", False)):
         return 0.0
@@ -326,7 +332,7 @@ def _cloud_cover_proxy(row: pd.Series) -> float:
 
 
 def _wind_shift(df: pd.DataFrame) -> float:
-    values = pd.to_numeric(df.get("wind_direction_deg"), errors="coerce").dropna().to_numpy(dtype=float)
+    values = _numeric_series(df, "wind_direction_deg").dropna().to_numpy(dtype=float)
     if len(values) < 2:
         return float("nan")
     diff = abs(values[-1] - values[0]) % 360

@@ -114,6 +114,7 @@ def operational_cycle(
         log=log,
         update_reports=update_reports,
         mode="api_operational_cycle",
+        allow_issue_time_advance=issue_time in (None, "now"),
     )
     if notify:
         summary["telegram_notification"] = notify_if_configured(format_operational_cycle_message(summary))
@@ -163,11 +164,13 @@ def predict_operational(
         refresh_nwp=refresh_nwp,
         log=log,
         mode="api_operational",
+        allow_issue_time_advance=issue_time in (None, "now"),
     )
+    effective_issue = result.get("issue_time_utc", issue)
     payload = operational_prediction_payload(
         airport=airport,
         target_date_local=target,
-        issue_time_utc=issue,
+        issue_time_utc=effective_issue,
         result=result,
     )
     payload["timezone"] = "Europe/Berlin"
