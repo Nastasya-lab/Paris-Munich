@@ -250,10 +250,23 @@ def _finite_or_nan(value) -> float:
 
 
 def _rolling_backtest(dataset: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
-    rows = []
-    folds = []
     base_features = list(CORE_INTRADAY_ML_FEATURES)
     enhanced_features = base_features + list(ENHANCED_METAR_INTRADAY_FEATURES)
+    return _rolling_backtest_with_feature_sets(
+        dataset,
+        {
+            "base_intraday_ml": base_features,
+            "enhanced_intraday_ml": enhanced_features,
+        },
+    )
+
+
+def _rolling_backtest_with_feature_sets(
+    dataset: pd.DataFrame,
+    feature_sets: dict[str, list[str]],
+) -> tuple[pd.DataFrame, list[dict]]:
+    rows = []
+    folds = []
     for fold_start in pd.date_range("2025-08-01", "2025-12-01", freq="MS").date:
         fold_end = (pd.Timestamp(fold_start) + pd.offsets.MonthEnd(1)).date()
         calibration_start = (pd.Timestamp(fold_start) - pd.Timedelta(days=90)).date()
@@ -274,13 +287,13 @@ def _rolling_backtest(dataset: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
                 }
             )
             continue
-        base_model = _fit_calibrated(train_core, calibration, base_features)
-        enhanced_model = _fit_calibrated(train_core, calibration, enhanced_features)
+        models = {
+            name: _fit_calibrated(train_core, calibration, features)
+            for name, features in feature_sets.items()
+        }
         for _, row in test.iterrows():
-            rows.append(_score("base_intraday_ml", row, base_model.predict_distribution(row.to_dict()), fold_start))
-            rows.append(
-                _score("enhanced_intraday_ml", row, enhanced_model.predict_distribution(row.to_dict()), fold_start)
-            )
+            for name, model in models.items():
+                rows.append(_score(name, row, model.predict_distribution(row.to_dict()), fold_start))
         folds.append(
             {
                 "fold_start": fold_start.isoformat(),
@@ -334,6 +347,8 @@ def _score(model_variant: str, row: pd.Series, prediction: tuple[TmaxDistributio
         "issue_time_utc": pd.Timestamp(row["issue_time_utc"]).isoformat(),
         "issue_hour_utc": int(row["issue_hour_utc"]),
         "season": _season(row["target_date_local"]),
+        "weather_regime": str(row.get("weather_regime", "unknown")),
+        "advection_regime": _advection_regime(row),
         "rain_or_cb_after_max": bool(
             row.get("rain_started_after_current_max", False) or row.get("cb_tcu_appeared_after_current_max", False)
         ),
@@ -406,6 +421,20 @@ def _recommendation(base: dict, enhanced: dict) -> dict:
 def _row(summary: pd.DataFrame, variant: str) -> dict:
     row = summary[summary["model_variant"] == variant]
     return {} if row.empty else row.iloc[0].to_dict()
+
+
+def _advection_regime(row: pd.Series) -> str:
+    if bool(row.get("adv_any_frontal_passage_signal", False)):
+        return "frontal_passage"
+    if bool(row.get("adv_any_cold_advection_signal", False)):
+        return "cold_advection"
+    if bool(row.get("adv_any_warm_advection_signal", False)):
+        return "warm_advection"
+    if bool(row.get("adv_any_north_sector", False)):
+        return "north_sector"
+    if bool(row.get("adv_any_south_sector", False)):
+        return "south_sector"
+    return "neutral_or_missing"
 
 
 def _covered(dist: TmaxDistribution, actual: float, mass: float) -> bool:

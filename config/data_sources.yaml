@@ -33,6 +33,39 @@ sources:
     whether_forecast_as_issued: false
     whether_allowed_for_training_features: false
     whether_allowed_for_truth_target: true
+  - source_id: meteofrance.base.hourly.air_temperature.95088001
+    name: Meteo-France BASE hourly observations, LE BOURGET
+    type: truth
+    historical_availability: "Official Meteo-France BASE/HOR department 95 files; station 95088001 has hourly rows for 2020-01-01 through the latest 2026 file checked on 2026-06-06"
+    latency_assumption: "final climatological hourly files are post-event truth; not allowed as same-day features unless a separate operational knowledge_time is assigned"
+    update_frequency: "published as department/period CSV.GZ archive files; latest file is refreshed by Meteo-France/data.gouv"
+    license_notes: "Meteo-France open data on data.gouv.fr, license LOV2 in checked catalog"
+    quality_notes: "preferred LFPB truth source; use T/TX/HTX and quality flags QT/QTX, then audit against daily TX"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: false
+    whether_allowed_for_truth_target: true
+  - source_id: meteofrance.base.daily.air_temperature.95088001
+    name: Meteo-France BASE daily RR-T-Vent observations, LE BOURGET
+    type: observation
+    historical_availability: "Official Meteo-France BASE/QUOT department 95 files; station 95088001 has daily TX from 1950-01-01 through the latest 2026 file checked on 2026-06-06"
+    latency_assumption: "daily final climatological truth is available after target day and provider publication"
+    update_frequency: "published as department/period CSV.GZ archive files; latest file is refreshed by Meteo-France/data.gouv"
+    license_notes: "Meteo-France open data on data.gouv.fr, license LOV2 in checked catalog"
+    quality_notes: "fallback and audit source for LFPB daily Tmax; preserves official TX but less useful for intraday Tmax timing than hourly rows"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: false
+    whether_allowed_for_truth_target: true
+  - source_id: meteofrance.synop.07150
+    name: Meteo-France SYNOP OMM observations, LE BOURGET
+    type: observation
+    historical_availability: "Official Meteo-France OBS/SYNOP archive; station 07150 appears in checked files from 2025-09-05 onward"
+    latency_assumption: "SYNOP insert_time/reference_time must be used for operational knowledge_time; historical archive is post-event"
+    update_frequency: "SYNOP essential observations, typically sub-daily/hourly depending on station reporting"
+    license_notes: "Meteo-France/data.gouv.fr SYNOP archive, license LOV2 in checked catalog"
+    quality_notes: "good operational cross-check for LFPB, but too short for 2020-2025 historical training by itself"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
   - source_id: iem.metar.archive.EDDM
     name: IEM archived METAR for EDDM
     type: metar
@@ -63,6 +96,50 @@ sources:
     update_frequency: "several times daily"
     license_notes: "IEM terms apply"
     quality_notes: "parser must preserve issue and valid intervals"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: iem.metar.archive.LFPB
+    name: IEM archived METAR for LFPB
+    type: metar
+    historical_availability: "IEM archive coverage must be validated for Paris-Le Bourget"
+    latency_assumption: "knowledge_time >= observation_time plus archive latency"
+    update_frequency: "sub-hourly to hourly depending on station reporting"
+    license_notes: "IEM terms apply"
+    quality_notes: "operational feature source; not truth target"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: awc.metar.live.LFPB
+    name: Aviation Weather Center live METAR for LFPB
+    type: metar
+    historical_availability: "live/recent, not full historical archive"
+    latency_assumption: "knowledge_time >= report receipt time"
+    update_frequency: "sub-hourly to hourly depending on station reporting"
+    license_notes: "NOAA/AWC terms apply"
+    quality_notes: "operational feature source"
+    whether_forecast_as_issued: false
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: iem.taf.archive.LFPB
+    name: IEM archived TAF for LFPB
+    type: taf
+    historical_availability: "IEM TAF coverage must be validated for Paris-Le Bourget"
+    latency_assumption: "knowledge_time >= TAF issue time plus archive latency"
+    update_frequency: "several times daily if station publishes TAF"
+    license_notes: "IEM terms apply"
+    quality_notes: "parser must preserve issue and valid intervals"
+    whether_forecast_as_issued: true
+    whether_allowed_for_training_features: true
+    whether_allowed_for_truth_target: false
+  - source_id: awc.taf.live.LFPB
+    name: Aviation Weather Center live TAF for LFPB
+    type: taf
+    historical_availability: "live/recent only"
+    latency_assumption: "knowledge_time >= issue time"
+    update_frequency: "several times daily if station publishes TAF"
+    license_notes: "NOAA/AWC terms apply"
+    quality_notes: "operational feature source"
     whether_forecast_as_issued: true
     whether_allowed_for_training_features: true
     whether_allowed_for_truth_target: false

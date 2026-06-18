@@ -16,3 +16,22 @@ airports:
       date_from: '1992-05-19'
       date_to: '2026-05-28'
       source_id: dwd.10min.air_temperature.01262
+  LFPB:
+    name: Paris-Le Bourget Airport
+    timezone: Europe/Paris
+    latitude: 48.969444
+    longitude: 2.441389
+    elevation_m: 67
+    truth_station:
+      provider: Meteo-France
+      station_id: '95088001'
+      station_name: LE BOURGET
+      wmo_id: '07150'
+      latitude: 48.967333
+      longitude: 2.427667
+      elevation_m: 49
+      distance_km: 1.03
+      date_from: '1950-01-01'
+      date_to: '2026-06-04'
+      source_id: meteofrance.base.hourly.air_temperature.95088001
+      fallback_source_id: meteofrance.base.daily.air_temperature.95088001

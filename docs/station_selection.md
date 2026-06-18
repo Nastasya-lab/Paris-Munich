@@ -1,5 +1,7 @@
 # Station selection for EDDM
 
+For Paris-Le Bourget (`LFPB`), see [station_selection_lfpb.md](station_selection_lfpb.md).
+
 Selected DWD station `01262` `Muenchen-Flughafen` at 48.3477, 11.8134, elevation 446.0 m. Distance to EDDM reference coordinates is about 2.13 km.
 
 Data period in current station metadata: `1992-05-19` to `2026-05-28`.
