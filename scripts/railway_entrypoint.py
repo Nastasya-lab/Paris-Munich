@@ -9,6 +9,8 @@ def main() -> None:
     job = resolve_job(os.getenv("RAILWAY_SERVICE_NAME"), os.getenv("WEATHER_TMAX_JOB"))
     _run([sys.executable, "scripts/railway_bootstrap.py"])
     if job == "api":
+        if os.getenv("WEATHER_TMAX_EMBEDDED_SCHEDULER", "").strip().lower() in {"1", "true", "yes", "on"}:
+            _start_embedded_scheduler()
         _run([sys.executable, "scripts/10_start_api.py"])
         return
     _run(build_api_job_command(job))
@@ -70,6 +72,14 @@ def build_api_job_command(job: str) -> list[str]:
 
 def _run(command: list[str]) -> None:
     subprocess.run(command, check=True)
+
+
+def _start_embedded_scheduler() -> None:
+    env = os.environ.copy()
+    if not env.get("MUNICH_API_BASE_URL"):
+        port = env.get("PORT", "8000")
+        env["MUNICH_API_BASE_URL"] = f"http://127.0.0.1:{port}"
+    subprocess.Popen([sys.executable, "scripts/56_embedded_scheduler.py"], env=env)
 
 
 if __name__ == "__main__":
