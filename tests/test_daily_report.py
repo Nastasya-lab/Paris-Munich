@@ -56,6 +56,23 @@ def test_final_daily_report_scores_dwd_variant_monitoring(tmp_path):
     assert report["best_variant"]["forecast_variant"] == "production_champion"
 
 
+def test_daily_report_handles_fractional_local_issue_hour(tmp_path):
+    variant_path = tmp_path / "forecast_variant_monitoring.parquet"
+    row = _scored_row("f1", "production_champion", 25.0, 25.3, 0.7)
+    row["local_issue_hour"] = 18.5
+    pd.DataFrame([row]).to_parquet(variant_path, index=False)
+
+    report = build_daily_model_report(
+        airport="EDDM",
+        target_date_local=date(2026, 6, 2),
+        mode="dwd_final",
+        variant_monitoring_path=variant_path,
+    )
+
+    assert report["status"] == "ok"
+    assert report["hourly_comparison"][0]["local_hour"] == 18
+
+
 def test_final_daily_report_waits_for_dwd_scored_rows(tmp_path):
     log_path = tmp_path / "forecast_log.jsonl"
     log_path.write_text(json.dumps(_forecast_record("f1", {"25": 1.0}, {}, 25.0)) + "\n", encoding="utf-8")

@@ -276,7 +276,7 @@ def _hourly_comparison(rows: pd.DataFrame) -> list[dict]:
     if rows.empty or "local_issue_hour" not in rows.columns:
         return []
     frame = rows.copy()
-    frame["local_hour_floor"] = pd.to_numeric(frame["local_issue_hour"], errors="coerce").astype("Int64")
+    frame["local_hour_floor"] = pd.to_numeric(frame["local_issue_hour"], errors="coerce").floordiv(1).astype("Int64")
     frame = frame[frame["local_hour_floor"].notna()]
     out = []
     for hour, group in frame.groupby("local_hour_floor"):
