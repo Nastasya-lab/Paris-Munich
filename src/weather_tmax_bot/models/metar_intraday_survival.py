@@ -57,7 +57,10 @@ def apply_metar_intraday_survival_layer(
         threshold: min(priors.get(threshold, 1.0), context_caps.get(threshold, 1.0))
         for threshold in range(1, max_upside + 1)
     }
-    dynamic_strength = float(np.clip(strength * _phase_strength(feature_row), 0.0, 1.0))
+    phase_gate = _morning_phase_gate(feature_row)
+    dynamic_strength = float(
+        np.clip(strength * _phase_strength(feature_row) * phase_gate["strength_multiplier"], 0.0, 1.0)
+    )
     adjusted_survival = {}
     for threshold in range(1, max_upside + 1):
         original = float(np.clip(original_survival.get(threshold, 0.0), 0.0, 1.0))
@@ -95,6 +98,7 @@ def apply_metar_intraday_survival_layer(
         "model_future_temp_max_c": _optional_float(feature_row, "model_future_temp_max_c"),
         "strength_requested": float(strength),
         "phase_strength": _phase_strength(feature_row),
+        "morning_phase_gate": phase_gate,
         "effective_strength": dynamic_strength,
         "original_probability_upside_ge_1c": original_survival.get(1, 0.0),
         "adjusted_probability_upside_ge_1c": adjusted_survival.get(1, 0.0),
@@ -220,6 +224,36 @@ def _phase_strength(feature_row: dict | pd.Series) -> float:
     if hour < 18:
         return 0.80
     return 0.95
+
+
+def _morning_phase_gate(feature_row: dict | pd.Series) -> dict:
+    hour = _optional_float(feature_row, "local_issue_hour")
+    future_delta = _optional_float(feature_row, "nwp_future_minus_current_max_c")
+    if future_delta is None:
+        model_future = _optional_float(feature_row, "model_future_temp_max_c")
+        current_max = _optional_float(feature_row, "current_metar_max_c")
+        future_delta = None if model_future is None or current_max is None else model_future - current_max
+    if hour is None or hour >= 12.0:
+        return {
+            "active": False,
+            "reason": "outside_morning_window",
+            "strength_multiplier": 1.0,
+            "nwp_future_minus_current_max_c": None if future_delta is None else float(future_delta),
+        }
+    if future_delta is None or future_delta < 3.0:
+        return {
+            "active": False,
+            "reason": "no_strong_future_heating",
+            "strength_multiplier": 1.0,
+            "nwp_future_minus_current_max_c": None if future_delta is None else float(future_delta),
+        }
+    multiplier = 0.75 if hour < 10.0 else 0.45
+    return {
+        "active": True,
+        "reason": "strong_future_heating_before_noon",
+        "strength_multiplier": multiplier,
+        "nwp_future_minus_current_max_c": float(future_delta),
+    }
 
 
 def _convective_rebound_guard(

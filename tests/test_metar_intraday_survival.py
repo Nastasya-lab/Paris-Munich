@@ -50,7 +50,33 @@ def test_morning_heating_window_keeps_survival_layer_weak() -> None:
 
     assert result.active is True
     assert result.details["effective_strength"] <= 0.1
+    assert result.details["morning_phase_gate"]["active"] is True
     assert result.distribution.threshold_ge(16) > 0.85
+
+
+def test_late_morning_future_heating_gate_limits_survival_strength() -> None:
+    base = TmaxDistribution([18, 19, 20, 21, 22], [0.10, 0.15, 0.25, 0.25, 0.25])
+    history = _history()
+    feature_row = {
+        "target_date_local": "2026-06-09",
+        "local_issue_hour": 11.0,
+        "current_metar_max_c": 18.0,
+        "latest_metar_temp_c": 18.0,
+        "drop_from_current_max_c": 0.0,
+        "temp_trend_1h": 0.5,
+        "temp_trend_3h": 2.0,
+        "has_rain_recent_metar": False,
+        "nwp_future_minus_current_max_c": 3.2,
+        "model_future_temp_max_c": 21.2,
+    }
+
+    result = apply_metar_intraday_survival_layer(base, feature_row, historical_dataset=history)
+
+    assert result.active is True
+    assert result.details["morning_phase_gate"]["active"] is True
+    assert result.details["morning_phase_gate"]["reason"] == "strong_future_heating_before_noon"
+    assert result.details["effective_strength"] <= 0.09
+    assert result.distribution.threshold_ge(19) > 0.8
 
 
 def test_midday_convective_rebound_guard_preserves_next_degree_upside() -> None:

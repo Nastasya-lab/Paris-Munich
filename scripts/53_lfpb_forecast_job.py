@@ -27,6 +27,7 @@ def main() -> None:
         "data/models/lfpb_metar_tmax_icon_d2_v1.joblib",
         "--metadata-path",
         "data/models/lfpb_metar_tmax_icon_d2_v1.metadata.json",
+        "--promote-spatial-candidate",
         "--report-path",
         "data/reports/latest_lfpb_icon_d2_metar_tmax_prediction.json",
     ]

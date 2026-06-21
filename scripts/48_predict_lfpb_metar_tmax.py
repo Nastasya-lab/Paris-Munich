@@ -15,6 +15,7 @@ from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_u
 from weather_tmax_bot.features.nwp_features import build_nwp_features
 from weather_tmax_bot.features.spatial_metar import DEFAULT_SPATIAL_STATIONS, build_spatial_metar_features
 from weather_tmax_bot.features.wind_advection import DEFAULT_ADVECTION_STATIONS, build_wind_advection_features
+from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.operations.refresh import refresh_awc_live
@@ -28,7 +29,13 @@ LONGITUDE = 2.441389
 MODEL_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.joblib")
 METADATA_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.metadata.json")
 LIVE_NWP_PATH = Path("data/forecasts/open_meteo_archive_LFPB.parquet")
+ENHANCED_ICON_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_icon_d2_LFPB_enhanced.parquet")
 HISTORICAL_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_icon_d2_LFPB.parquet")
+ECMWF_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_ecmwf_ifs_LFPB.parquet")
+AROME_NWP_PATHS = [
+    Path("data/forecasts/open_meteo_single_runs_meteofrance_arome_france_hd_LFPB_holdout_analysis.parquet"),
+    Path("data/forecasts/open_meteo_single_runs_meteofrance_arome_france_hd_LFPB_analysis.parquet"),
+]
 SURVIVAL_DATASET_PATH = Path("data/processed/metar_upside_dataset_LFPB_icon_d2.parquet")
 SPATIAL_CANDIDATE_MODEL_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.joblib")
 SPATIAL_CANDIDATE_METADATA_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json")
@@ -90,6 +97,33 @@ def main() -> None:
         issue_time_utc=issue_time_utc,
         base_feature_row=feature_row,
     )
+    base_production_distribution = distribution
+    base_production_model_version = metadata.get("model_version", "lfpb_metar_tmax_upside_v1")
+    production_selection = {
+        "selected": "base_icon_d2",
+        "reason": "spatial_candidate_not_promoted",
+        "promote_spatial_candidate_requested": bool(args.promote_spatial_candidate),
+    }
+    if args.promote_spatial_candidate and spatial_candidate.get("active"):
+        promoted = _distribution_from_payload(spatial_candidate.get("forecast"))
+        if promoted is not None:
+            distribution = promoted
+            production_selection = {
+                "selected": "spatial_wind_advection_candidate",
+                "reason": "active_spatial_candidate_promoted_by_job_flag",
+                "promote_spatial_candidate_requested": True,
+                "base_model_version": base_production_model_version,
+                "promoted_model_version": spatial_candidate.get("model_version"),
+                "base_expected_tmax_c": base_production_distribution.expected_tmax_c,
+                "promoted_expected_tmax_c": distribution.expected_tmax_c,
+            }
+            feature_row["production_expected_tmax_c"] = distribution.expected_tmax_c
+    production_model_version = (
+        spatial_candidate.get("model_version")
+        if production_selection["selected"] == "spatial_wind_advection_candidate"
+        else base_production_model_version
+    )
+    nwp_source_diagnostics = _build_nwp_source_diagnostics(feature_row)
     forecast_id = None
     if args.log:
         forecast_id = log_forecast(
@@ -104,9 +138,12 @@ def main() -> None:
                 "model_family": "metar_tmax_remaining_upside",
                 "intraday_survival_layer": survival_adjustment.details,
                 "base_forecast_before_intraday_survival": base_distribution.to_payload(),
+                "base_production_before_spatial_promotion": base_production_distribution.to_payload(),
+                "production_selection": production_selection,
+                "nwp_source_diagnostics": nwp_source_diagnostics,
                 "spatial_candidate": spatial_candidate,
             },
-            model_version=metadata.get("model_version", "lfpb_metar_tmax_upside_v1"),
+            model_version=production_model_version,
         )
     payload = {
         "forecast_id": forecast_id,
@@ -116,12 +153,14 @@ def main() -> None:
         "target_date_local": target_date.isoformat(),
         "timezone": TIMEZONE,
         "issue_time_utc": issue_time_utc.isoformat(),
-        "model_version": metadata.get("model_version", "lfpb_metar_tmax_upside_v1"),
+        "model_version": production_model_version,
         "calibration": (metadata.get("calibration_metadata") or {}).get("calibration_method", "unknown"),
         "calibration_attached": _calibration_attached(model),
         "forecast": distribution.to_payload(),
         "base_forecast_before_intraday_survival": base_distribution.to_payload(),
+        "base_production_before_spatial_promotion": base_production_distribution.to_payload(),
         "intraday_survival_layer": survival_adjustment.details,
+        "production_selection": production_selection,
         "spatial_candidate": spatial_candidate,
         "metar_signal": {
             "latest_metar_time_utc": feature_row.get("latest_metar_time_utc"),
@@ -148,6 +187,11 @@ def main() -> None:
             "max_feature_knowledge_time_utc": feature_row.get("max_feature_knowledge_time_utc"),
             "source": "AWC live METAR if refreshed; local AWC/IEM METAR archive fallback",
             "latest_nwp_source_id": feature_row.get("latest_nwp_source_id"),
+            "selected_nwp_source_label": feature_row.get("selected_nwp_source_label"),
+            "available_nwp_source_labels": feature_row.get("available_nwp_source_labels"),
+            "nwp_tmax_spread_c": feature_row.get("nwp_tmax_spread_c"),
+            "nwp_tmax_by_source": feature_row.get("nwp_tmax_by_source"),
+            "nwp_source_diagnostics": nwp_source_diagnostics,
             "max_nwp_knowledge_time_utc": feature_row.get("max_nwp_knowledge_time_utc"),
             "model_tmax_c": feature_row.get("model_tmax_c"),
             "model_future_temp_max_c": feature_row.get("model_future_temp_max_c"),
@@ -342,17 +386,63 @@ def _refresh_open_meteo_live(airport: str, target_date_local: date | None) -> di
 
 
 def _load_nwp_features(target_date_local: date, issue_time_utc) -> dict:
-    frames = []
-    for path in [LIVE_NWP_PATH, HISTORICAL_NWP_PATH]:
-        if path.exists():
-            frames.append(pd.read_parquet(path))
-    if not frames:
-        return {"nwp_missing": True, "model_tmax_c": None}
-    frame = pd.concat(frames, ignore_index=True)
+    candidates = []
+    source_specs = [
+        ("live_icon_d2", LIVE_NWP_PATH),
+        ("enhanced_icon_d2", ENHANCED_ICON_NWP_PATH),
+        ("historical_icon_d2", HISTORICAL_NWP_PATH),
+        ("ecmwf_ifs", ECMWF_NWP_PATH),
+        *[(f"arome_france_hd_{idx}", path) for idx, path in enumerate(AROME_NWP_PATHS, start=1)],
+    ]
+    for label, path in source_specs:
+        candidate = _nwp_candidate_from_path(label, path, target_date_local, issue_time_utc)
+        if candidate is not None:
+            candidates.append(candidate)
+    if not candidates:
+        return {
+            "nwp_missing": True,
+            "model_tmax_c": None,
+            "available_nwp_source_labels": [],
+            "nwp_tmax_by_source": {},
+            "nwp_tmax_spread_c": None,
+        }
+    selected = candidates[0]
+    features = dict(selected["features"])
+    tmax_by_source = {
+        item["label"]: item["features"].get("model_tmax_c")
+        for item in candidates
+        if not pd.isna(item["features"].get("model_tmax_c"))
+    }
+    tmax_values = [float(value) for value in tmax_by_source.values() if not pd.isna(value)]
+    features.update(
+        {
+            "selected_nwp_source_label": selected["label"],
+            "available_nwp_source_labels": [item["label"] for item in candidates],
+            "available_nwp_source_ids": [item["features"].get("latest_nwp_source_id") for item in candidates],
+            "nwp_tmax_by_source": tmax_by_source,
+            "nwp_tmax_spread_c": (max(tmax_values) - min(tmax_values)) if len(tmax_values) >= 2 else 0.0,
+            "nwp_tmax_mean_c": sum(tmax_values) / len(tmax_values) if tmax_values else None,
+            "nwp_fallback_used": selected["label"] not in {"live_icon_d2", "enhanced_icon_d2", "historical_icon_d2"},
+        }
+    )
+    return features
+
+
+def _nwp_candidate_from_path(label: str, path: Path, target_date_local: date, issue_time_utc) -> dict | None:
+    if not path.exists():
+        return None
+    frame = pd.read_parquet(path)
+    if frame.empty:
+        return None
     if "airport_icao" in frame.columns:
         frame = frame[frame["airport_icao"].fillna(AIRPORT) == AIRPORT].copy()
+    if "target_date_local" not in frame.columns:
+        return None
     frame = frame[frame["target_date_local"].astype(str) == target_date_local.isoformat()].copy()
-    return build_nwp_features(frame, issue_time_utc)
+    features = build_nwp_features(frame, issue_time_utc)
+    if features.get("nwp_missing") or pd.isna(features.get("model_tmax_c")):
+        return None
+    return {"label": label, "path": str(path), "features": features}
 
 
 def _add_nwp_relative_features(nwp_features: dict, metar_features: dict) -> None:
@@ -367,12 +457,64 @@ def _add_nwp_relative_features(nwp_features: dict, metar_features: dict) -> None
     )
 
 
+def _build_nwp_source_diagnostics(feature_row: dict) -> dict:
+    selected = feature_row.get("selected_nwp_source_label")
+    labels = feature_row.get("available_nwp_source_labels") or []
+    spread = feature_row.get("nwp_tmax_spread_c")
+    fallback_used = bool(feature_row.get("nwp_fallback_used"))
+    if not labels:
+        return {
+            "level": "missing",
+            "reason": "no_nwp_source_available",
+            "diagnostic_only": True,
+            "recommended_uncertainty_padding_c": None,
+        }
+
+    spread_value = None if spread is None or pd.isna(spread) else float(spread)
+    level = "low"
+    reasons = []
+    padding = 0.0
+    if fallback_used:
+        level = "moderate"
+        padding = max(padding, 0.5)
+        reasons.append("non_icon_fallback_selected")
+    if spread_value is not None:
+        if spread_value >= 2.5:
+            level = "high"
+            padding = max(padding, 1.0)
+            reasons.append("large_cross_source_tmax_spread")
+        elif spread_value >= 1.5 and level != "high":
+            level = "moderate"
+            padding = max(padding, 0.5)
+            reasons.append("moderate_cross_source_tmax_spread")
+    if selected not in {"live_icon_d2", "enhanced_icon_d2", "historical_icon_d2"} and level == "low":
+        level = "moderate"
+        padding = max(padding, 0.5)
+        reasons.append("source_family_shift")
+
+    return {
+        "level": level,
+        "reason": "+".join(reasons) if reasons else "primary_icon_source_selected",
+        "diagnostic_only": True,
+        "recommended_uncertainty_padding_c": padding,
+    }
+
+
 def _parquet_rows(path: Path) -> int:
     return 0 if not path.exists() else len(pd.read_parquet(path))
 
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def _distribution_from_payload(payload: dict | None) -> TmaxDistribution | None:
+    probabilities = (payload or {}).get("probabilities_by_integer_c")
+    if not probabilities:
+        return None
+    bins = [int(key) for key in probabilities.keys()]
+    probs = [float(value) for value in probabilities.values()]
+    return TmaxDistribution(bins, probs)
 
 
 def _calibration_attached(model) -> bool:
@@ -455,8 +597,7 @@ def _format_message(payload: dict) -> str:
             "",
             "<b>Данные</b>",
             f"Последний METAR: <code>{signal.get('latest_metar_time_utc')}</code>",
-            f"ICON-D2 Tmax: {_fmt_float(payload['data_lineage'].get('model_tmax_c'))} °C",
-            f"ICON-D2 future max: {_fmt_float(payload['data_lineage'].get('model_future_temp_max_c'))} °C",
+            *_format_nwp_source_lines(payload),
             f"Max knowledge time: <code>{payload['data_lineage'].get('max_feature_knowledge_time_utc')}</code>",
             f"Leakage check: {'ok' if payload['data_lineage'].get('leakage_check_passed') else 'failed'}",
             "",
@@ -469,6 +610,25 @@ def _fmt_float(value) -> str:
     if value is None or pd.isna(value):
         return "н/д"
     return f"{float(value):+.1f}"
+
+
+def _format_nwp_source_lines(payload: dict) -> list[str]:
+    lineage = payload.get("data_lineage") or {}
+    selected = lineage.get("selected_nwp_source_label") or "unknown"
+    labels = lineage.get("available_nwp_source_labels") or []
+    diagnostics = lineage.get("nwp_source_diagnostics") or {}
+    available = ", ".join(str(label) for label in labels) if labels else "none"
+    level = diagnostics.get("level") or "unknown"
+    reason = diagnostics.get("reason") or "unknown"
+    padding = diagnostics.get("recommended_uncertainty_padding_c")
+    padding_text = "n/a" if padding is None or pd.isna(padding) else f"{float(padding):.1f} C"
+    return [
+        f"NWP source: <code>{selected}</code> (available: <code>{available}</code>)",
+        f"NWP Tmax: {_fmt_float(lineage.get('model_tmax_c'))} °C",
+        f"NWP future max: {_fmt_float(lineage.get('model_future_temp_max_c'))} °C",
+        f"NWP Tmax spread: {_fmt_float(lineage.get('nwp_tmax_spread_c'))} °C",
+        f"NWP uncertainty: <code>{level}</code>, padding note {padding_text}, <code>{reason}</code>",
+    ]
 
 
 def _format_rebound_guard_lines(survival: dict) -> list[str]:
@@ -488,6 +648,8 @@ def _format_rebound_guard_lines(survival: dict) -> list[str]:
 
 def _format_spatial_candidate_lines(payload: dict) -> list[str]:
     candidate = payload.get("spatial_candidate") or {}
+    selection = payload.get("production_selection") or {}
+    promoted = selection.get("selected") == "spatial_wind_advection_candidate"
     if not candidate.get("enabled", False):
         return []
     if not candidate.get("active", False):
@@ -538,7 +700,11 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
         )
     return [
         "<b>Spatial + wind/advection candidate</b>",
-        "Заменяет прежний spatial-кандидат LFPG/LFPO. Не влияет на основной прогноз. Активен только 12:00-18:00 по Парижу.",
+        (
+            "Использован как основной прогноз в этом выпуске. Активен только 12:00-18:00 по Парижу."
+            if promoted
+            else "Заменяет прежний spatial-кандидат LFPG/LFPO. Не влияет на основной прогноз. Активен только 12:00-18:00 по Парижу."
+        ),
         f"Ожидаемый METAR Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} °C</b> ({_fmt_delta(delta)} к production)",
         f"Медиана: {float(forecast.get('median_tmax_c', 0.0)):.1f} °C",
         f"Самая вероятная корзина: <b>{forecast.get('most_likely_integer_c')} °C</b>",
@@ -603,6 +769,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", type=Path, default=MODEL_PATH)
     parser.add_argument("--metadata-path", type=Path, default=METADATA_PATH)
     parser.add_argument("--spatial-candidate", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--promote-spatial-candidate", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--report-path", default="data/reports/latest_lfpb_metar_tmax_prediction.json")
     return parser.parse_args()
 

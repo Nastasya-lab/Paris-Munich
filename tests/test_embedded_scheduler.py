@@ -37,9 +37,11 @@ def test_embedded_scheduler_runs_forecast_on_configured_slots() -> None:
 def test_embedded_scheduler_runs_outcome_and_daily_report() -> None:
     outcome_jobs = embedded_scheduler.due_jobs(datetime(2026, 6, 18, 6, 30, tzinfo=timezone.utc))
     report_jobs = embedded_scheduler.due_jobs(datetime(2026, 6, 18, 18, 15, tzinfo=timezone.utc))
+    live_baseline_jobs = embedded_scheduler.due_jobs(datetime(2026, 6, 18, 18, 20, tzinfo=timezone.utc))
 
     assert "outcome" in [job.name for job in outcome_jobs]
     assert "daily_report" in [job.name for job in report_jobs]
+    assert "live_baseline" in [job.name for job in live_baseline_jobs]
 
 
 def test_railway_entrypoint_defaults_to_api_for_main_service() -> None:

@@ -78,6 +78,14 @@ def due_jobs(now: datetime) -> list[SchedulerJob]:
                 command=[sys.executable, "scripts/33_call_api_job.py", "daily-report"],
             )
         )
+    if now.hour == 18 and now.minute == 20:
+        jobs.append(
+            SchedulerJob(
+                name="live_baseline",
+                due_key=now.strftime("%Y-%m-%d"),
+                command=[sys.executable, "scripts/73_build_live_baseline_report.py"],
+            )
+        )
     return jobs
 
 
