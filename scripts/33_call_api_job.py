@@ -71,14 +71,15 @@ def main(
             poll_timeout_seconds=poll_timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
         )
-        _attach_daily_report_if_enabled(
-            result,
-            base=base,
-            headers=headers,
-            airport=airport,
-            target=target,
-            request_timeout=timeout,
-        )
+        if os.getenv("WEATHER_TMAX_EMBED_DAILY_REPORT_ON_METAR", "0").strip().lower() in {"1", "true", "yes", "on"}:
+            _attach_daily_report_if_enabled(
+                result,
+                base=base,
+                headers=headers,
+                airport=airport,
+                target=target,
+                request_timeout=timeout,
+            )
         print(json.dumps(_compact_job_result(job, result), indent=2, default=str))
         return
     elif job == "outcome":

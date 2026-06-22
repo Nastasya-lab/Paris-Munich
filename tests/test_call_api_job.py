@@ -152,6 +152,52 @@ def test_forecast_job_attaches_daily_report_when_available(monkeypatch, capsys):
     assert "production_champion" in out
 
 
+def test_metar_event_job_does_not_attach_daily_report_by_default(monkeypatch, capsys):
+    module = _load_job_module()
+    calls = []
+
+    class DummyResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    def fake_post(url, params, headers, timeout):
+        calls.append((url, params))
+        return DummyResponse(
+            {
+                "status": "new_metar_forecast",
+                "airport": "EDDM",
+                "latest_metar_time_utc": "2026-06-02T16:20:00Z",
+                "notification_sent": False,
+            }
+        )
+
+    monkeypatch.setenv("MUNICH_API_BASE_URL", "https://example.test")
+    monkeypatch.delenv("WEATHER_TMAX_EMBED_DAILY_REPORT_ON_METAR", raising=False)
+    monkeypatch.setattr(module.requests, "post", fake_post)
+
+    module.main(
+        job="metar-event",
+        base_url=None,
+        airport="EDDM",
+        target_date="2026-06-02",
+        issue_time="now",
+        timeout=10,
+        poll_timeout_seconds=0,
+        poll_interval_seconds=30,
+    )
+
+    out = capsys.readouterr().out
+    assert len(calls) == 1
+    assert calls[0][0].endswith("/metar-event-cycle")
+    assert '"daily_report"' not in out
+
+
 def test_daily_report_not_ready_is_not_logged(monkeypatch):
     module = _load_job_module()
     payload = {"airport": "EDDM"}
