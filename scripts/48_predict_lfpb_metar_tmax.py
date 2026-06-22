@@ -15,7 +15,12 @@ from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_u
 from weather_tmax_bot.features.nwp_features import build_nwp_features
 from weather_tmax_bot.features.spatial_metar import DEFAULT_SPATIAL_STATIONS, build_spatial_metar_features
 from weather_tmax_bot.features.wind_advection import DEFAULT_ADVECTION_STATIONS, build_wind_advection_features
-from weather_tmax_bot.models.distribution import TmaxDistribution
+from weather_tmax_bot.models.distribution import (
+    TmaxDistribution,
+    project_unimodal_distribution,
+    temperature_scale_distribution,
+    unimodal_violation_count,
+)
 from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.operations.refresh import refresh_awc_live
@@ -41,6 +46,9 @@ SPATIAL_CANDIDATE_MODEL_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial
 SPATIAL_CANDIDATE_METADATA_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json")
 SPATIAL_CANDIDATE_LOCAL_HOUR_START = 12
 SPATIAL_CANDIDATE_LOCAL_HOUR_END = 18
+UNIMODAL_SHADOW_VARIANT = "shadow_unimodal_pmf"
+UNIMODAL_SHADOW_VERSION = "lfpb_pmf_temperature_unimodal_shadow_v1"
+UNIMODAL_SHADOW_TEMPERATURE = 0.67
 
 
 def main() -> None:
@@ -123,6 +131,17 @@ def main() -> None:
         if production_selection["selected"] == "spatial_wind_advection_candidate"
         else base_production_model_version
     )
+    unimodal_shadow_candidate = _build_unimodal_shadow_candidate(
+        distribution,
+        champion_model_version=production_model_version,
+        feature_row=feature_row,
+    )
+    forecast_variants = _build_forecast_variants(
+        distribution,
+        production_model_version=production_model_version,
+        feature_row=feature_row,
+        unimodal_shadow_candidate=unimodal_shadow_candidate,
+    )
     nwp_source_diagnostics = _build_nwp_source_diagnostics(feature_row)
     forecast_id = None
     if args.log:
@@ -142,6 +161,8 @@ def main() -> None:
                 "production_selection": production_selection,
                 "nwp_source_diagnostics": nwp_source_diagnostics,
                 "spatial_candidate": spatial_candidate,
+                "forecast_variants": forecast_variants,
+                "unimodal_shadow_candidate": unimodal_shadow_candidate,
             },
             model_version=production_model_version,
         )
@@ -162,6 +183,8 @@ def main() -> None:
         "intraday_survival_layer": survival_adjustment.details,
         "production_selection": production_selection,
         "spatial_candidate": spatial_candidate,
+        "forecast_variants": forecast_variants,
+        "unimodal_shadow_candidate": unimodal_shadow_candidate,
         "metar_signal": {
             "latest_metar_time_utc": feature_row.get("latest_metar_time_utc"),
             "latest_metar_temp_c": feature_row.get("latest_metar_temp_c"),
@@ -517,6 +540,113 @@ def _distribution_from_payload(payload: dict | None) -> TmaxDistribution | None:
     return TmaxDistribution(bins, probs)
 
 
+def _build_forecast_variants(
+    distribution: TmaxDistribution,
+    *,
+    production_model_version: str,
+    feature_row: dict,
+    unimodal_shadow_candidate: dict,
+) -> dict:
+    local_issue_hour = _clean_optional_float(feature_row.get("local_issue_hour"))
+    return {
+        "production_champion": {
+            "description": "Operational LFPB METAR Tmax distribution sent to users.",
+            "distribution": distribution.to_payload(),
+            "metadata": {
+                "variant_version": production_model_version,
+                "local_issue_hour": local_issue_hour,
+                "forecast_phase": _forecast_phase(local_issue_hour),
+            },
+        },
+        UNIMODAL_SHADOW_VARIANT: {
+            "description": "Shadow-only temperature-scaled unimodal PMF candidate; does not affect Telegram forecast.",
+            "distribution": (unimodal_shadow_candidate.get("forecast") or {}),
+            "metadata": unimodal_shadow_candidate.get("metadata") or {},
+        },
+    }
+
+
+def _build_unimodal_shadow_candidate(
+    distribution: TmaxDistribution,
+    *,
+    champion_model_version: str,
+    feature_row: dict,
+) -> dict:
+    temperature_scaled = temperature_scale_distribution(distribution, UNIMODAL_SHADOW_TEMPERATURE)
+    shadow = project_unimodal_distribution(temperature_scaled)
+    champion_payload = distribution.to_payload()
+    shadow_payload = shadow.to_payload()
+    local_issue_hour = _clean_optional_float(feature_row.get("local_issue_hour"))
+    expected_delta = shadow.expected_tmax_c - distribution.expected_tmax_c
+    ge_30_delta = (
+        shadow_payload["threshold_probabilities"].get("ge_30", 0.0)
+        - champion_payload["threshold_probabilities"].get("ge_30", 0.0)
+    )
+    return {
+        "enabled": True,
+        "active": True,
+        "status": "shadow_only_does_not_affect_operational_forecast",
+        "variant": UNIMODAL_SHADOW_VARIANT,
+        "model_version": UNIMODAL_SHADOW_VERSION,
+        "champion_model_version": champion_model_version,
+        "forecast": shadow_payload,
+        "champion_shape": _shape_summary(distribution),
+        "shadow_shape": _shape_summary(shadow),
+        "comparison_to_champion": {
+            "expected_tmax_delta_c": expected_delta,
+            "most_likely_integer_delta_c": shadow.most_likely_integer_c - distribution.most_likely_integer_c,
+            "ge_30_probability_delta": ge_30_delta,
+        },
+        "metadata": {
+            "variant_version": UNIMODAL_SHADOW_VERSION,
+            "status": "shadow_only_does_not_affect_operational_forecast",
+            "local_issue_hour": local_issue_hour,
+            "forecast_phase": _forecast_phase(local_issue_hour),
+            "temperature": UNIMODAL_SHADOW_TEMPERATURE,
+            "temperature_source": "rolling_mean_from_lfpb_unimodal_projection_rolling_backtest",
+            "projection_method": "least_squares_unimodal_projection_by_candidate_mode",
+            "champion_model_version": champion_model_version,
+            "champion_unimodal_violation_count": unimodal_violation_count(distribution),
+            "shadow_unimodal_violation_count": unimodal_violation_count(shadow),
+            "expected_tmax_delta_c": expected_delta,
+        },
+    }
+
+
+def _clean_optional_float(value) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _shape_summary(distribution: TmaxDistribution) -> dict:
+    probs = distribution.probabilities
+    deep_valleys = 0
+    if len(probs) >= 3:
+        for idx in range(1, len(probs) - 1):
+            left, center, right = probs[idx - 1], probs[idx], probs[idx + 1]
+            if min(left, right) >= 0.08 and center <= 0.60 * min(left, right):
+                deep_valleys += 1
+    return {
+        "unimodal_violation_count": unimodal_violation_count(distribution),
+        "deep_valley_count": int(deep_valleys),
+        "max_adjacent_probability_jump": float(abs(pd.Series(probs).diff()).max()) if len(probs) >= 2 else 0.0,
+    }
+
+
+def _forecast_phase(local_issue_hour) -> str:
+    if local_issue_hour is None or pd.isna(local_issue_hour):
+        return "unknown"
+    hour = float(local_issue_hour)
+    if hour < 10:
+        return "morning"
+    if hour < 14:
+        return "midday"
+    if hour < 18:
+        return "afternoon"
+    return "evening"
+
+
 def _calibration_attached(model) -> bool:
     direct = getattr(model, "calibrator", None)
     if direct is not None:
@@ -557,6 +687,8 @@ def _format_message(payload: dict) -> str:
             "",
             "<b>Вероятности по градусам</b>",
             bin_text,
+            "",
+            *_format_unimodal_shadow_lines(payload),
             "",
             "<b>Вероятности событий</b>",
             f"Не ниже +20 °C: {thresholds['ge_20']:.1%}",
@@ -604,6 +736,38 @@ def _format_message(payload: dict) -> str:
             f"<code>{signal.get('latest_metar_raw')}</code>",
         ]
     )
+
+
+def _format_unimodal_shadow_lines(payload: dict) -> list[str]:
+    variants = payload.get("forecast_variants") or {}
+    shadow = variants.get(UNIMODAL_SHADOW_VARIANT) or {}
+    forecast = shadow.get("distribution") or {}
+    probabilities = forecast.get("probabilities_by_integer_c") or {}
+    if not probabilities:
+        return []
+    bins = {
+        int(bin_c): float(probability)
+        for bin_c, probability in probabilities.items()
+        if float(probability) >= 0.01
+    }
+    bin_text = "\n".join(f"{bin_c:+d} C: <b>{probability:.1%}</b>" for bin_c, probability in sorted(bins.items()))
+    if not bin_text:
+        bin_text = "No bins above 1%."
+    interval_80 = (forecast.get("intervals") or {}).get("80") or [None, None]
+    metadata = shadow.get("metadata") or {}
+    comparison = (payload.get("unimodal_shadow_candidate") or {}).get("comparison_to_champion") or {}
+    delta = comparison.get("expected_tmax_delta_c")
+    delta_text = "n/a" if delta is None or pd.isna(delta) else f"{float(delta):+.1f} C vs production"
+    return [
+        "<b>Shadow unimodal PMF</b>",
+        "Diagnostic only: not used as the operational forecast.",
+        f"Expected METAR Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} C</b> ({delta_text})",
+        f"Median: {float(forecast.get('median_tmax_c', 0.0)):.1f} C",
+        f"Most likely bin: <b>{forecast.get('most_likely_integer_c')} C</b>",
+        f"80% interval: {_fmt_plain(interval_80[0])}...{_fmt_plain(interval_80[1])} C",
+        f"Shape violations: {metadata.get('shadow_unimodal_violation_count', 'n/a')}",
+        bin_text,
+    ]
 
 
 def _fmt_float(value) -> str:

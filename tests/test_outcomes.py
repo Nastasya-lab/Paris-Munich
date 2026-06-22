@@ -86,6 +86,63 @@ def test_update_forecast_outcomes(tmp_path):
     assert out.iloc[0]["forecast_acceptance_cautions"] == "preliminary calibration"
 
 
+def test_update_forecast_outcomes_scores_unimodal_shadow_variant(tmp_path):
+    log_path = tmp_path / "forecast_log.jsonl"
+    target_path = tmp_path / "daily_target.parquet"
+    output_path = tmp_path / "monitoring.parquet"
+    variant_output_path = tmp_path / "variant_monitoring.parquet"
+    record = {
+        "forecast_id": "f1",
+        "airport": "LFPB",
+        "issue_time_utc": "2026-07-15T12:00:00+00:00",
+        "target_date_local": "2026-07-15",
+        "model_version": "production_v1",
+        "probability_distribution": {"35": 0.1, "36": 0.5, "37": 0.1, "38": 0.3},
+        "expected_tmax_c": 36.6,
+        "median_tmax_c": 36.0,
+        "raw_input_metadata": {
+            "forecast_variants": {
+                "production_champion": {
+                    "description": "production",
+                    "distribution": {"probabilities_by_integer_c": {"35": 0.1, "36": 0.5, "37": 0.1, "38": 0.3}},
+                    "metadata": {
+                        "variant_version": "production_v1",
+                        "forecast_phase": "afternoon",
+                        "local_issue_hour": 14.0,
+                    },
+                },
+                "shadow_unimodal_pmf": {
+                    "description": "unimodal shadow",
+                    "distribution": {"probabilities_by_integer_c": {"35": 0.1, "36": 0.35, "37": 0.35, "38": 0.2}},
+                    "metadata": {
+                        "variant_version": "lfpb_pmf_temperature_unimodal_shadow_v1",
+                        "forecast_phase": "afternoon",
+                        "local_issue_hour": 14.0,
+                    },
+                },
+            }
+        },
+    }
+    log_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    pd.DataFrame(
+        {
+            "airport_icao": ["LFPB"],
+            "target_date_local": ["2026-07-15"],
+            "tmax_c": [37.0],
+            "quality_flags": ["ok"],
+        }
+    ).to_parquet(target_path, index=False)
+
+    update_forecast_outcomes(log_path, target_path, output_path, variant_output_path=variant_output_path)
+
+    variants = pd.read_parquet(variant_output_path)
+    assert set(variants["forecast_variant"]) == {"production_champion", "shadow_unimodal_pmf"}
+    shadow = variants[variants["forecast_variant"] == "shadow_unimodal_pmf"].iloc[0]
+    assert shadow["variant_version"] == "lfpb_pmf_temperature_unimodal_shadow_v1"
+    assert shadow["forecast_phase"] == "afternoon"
+    assert shadow["probability_actual_integer_bin"] == 0.35
+
+
 def test_build_forecast_outcome_status_marks_pending_and_scored(tmp_path):
     log_path = tmp_path / "forecast_log.jsonl"
     target_path = tmp_path / "daily_target.parquet"

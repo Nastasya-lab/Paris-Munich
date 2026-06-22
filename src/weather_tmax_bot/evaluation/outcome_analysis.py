@@ -7,7 +7,7 @@ import pandas as pd
 
 from weather_tmax_bot.evaluation.promotion_gate import evaluate_shadow_promotion_gate
 
-PUBLIC_VARIANTS = {"production_champion"}
+PUBLIC_VARIANTS = {"production_champion", "shadow_unimodal_pmf"}
 
 
 def build_outcome_analysis(
