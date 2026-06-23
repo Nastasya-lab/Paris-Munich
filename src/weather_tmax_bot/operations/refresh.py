@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 from weather_tmax_bot.data.awc import AWCAdapter
 from weather_tmax_bot.data.nwp import NWPArchive
@@ -42,17 +43,27 @@ def refresh_awc_live(airport: str = "EDDM", root: str | Path = ".") -> dict:
     root = Path(root)
     adapter = AWCAdapter()
     metar = adapter.fetch_latest_metar(airport, hours=30)
-    taf = adapter.fetch_latest_taf(airport)
     metar_path = root / f"data/forecasts/awc_metar_live_{airport}.parquet"
     taf_path = root / f"data/forecasts/awc_taf_live_{airport}.parquet"
     _append_dedup(metar, metar_path)
-    _append_dedup(taf, taf_path)
-    return {
+    taf_error = None
+    try:
+        taf = adapter.fetch_latest_taf(airport)
+    except requests.RequestException as exc:
+        taf = pd.DataFrame()
+        taf_error = str(exc)
+    else:
+        _append_dedup(taf, taf_path)
+    summary = {
         "metar_rows_fetched": len(metar),
         "taf_rows_fetched": len(taf),
         "metar_archive_rows": _rows(metar_path),
         "taf_archive_rows": _rows(taf_path),
     }
+    if taf_error:
+        summary["taf_refresh_error"] = taf_error
+        summary["taf_refresh_degraded"] = True
+    return summary
 
 
 def refresh_spatial_awc_live(airport: str = "EDDM", root: str | Path = ".") -> dict:

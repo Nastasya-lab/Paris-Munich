@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 
 import pandas as pd
+import requests
 
 from weather_tmax_bot.data.nwp import NWPArchive
 from weather_tmax_bot.operations import refresh as refresh_module
@@ -57,6 +58,36 @@ def test_refresh_open_meteo_nwp_uses_fetcher(monkeypatch, tmp_path):
 
     assert summary["rows_fetched"] == 1
     assert summary["archive_rows"] == 1
+
+
+def test_refresh_awc_live_keeps_metar_when_taf_fetch_fails(monkeypatch, tmp_path):
+    ingest = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+
+    class FakeAWCAdapter:
+        def fetch_latest_metar(self, airport, hours=None):
+            return pd.DataFrame(
+                {
+                    "raw_record_hash": ["m1"],
+                    "ingest_time_utc": [ingest],
+                    "knowledge_time_utc": [ingest],
+                    "observation_time_utc": [ingest],
+                    "temperature_c": [24.0],
+                    "visibility": ["6+"],
+                }
+            )
+
+        def fetch_latest_taf(self, airport):
+            raise requests.HTTPError("504 Gateway Time-out")
+
+    monkeypatch.setattr(refresh_module, "AWCAdapter", FakeAWCAdapter)
+
+    summary = refresh_module.refresh_awc_live("EDDM", root=tmp_path)
+
+    assert summary["metar_rows_fetched"] == 1
+    assert summary["taf_rows_fetched"] == 0
+    assert summary["taf_refresh_degraded"] == True
+    assert "504 Gateway Time-out" in summary["taf_refresh_error"]
+    assert (tmp_path / "data/forecasts/awc_metar_live_EDDM.parquet").exists()
 
 
 def test_refresh_frame_normalizes_mixed_awc_visibility_types():

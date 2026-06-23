@@ -3,15 +3,17 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 
 
 def main() -> None:
+    _configure_low_memory_runtime()
     job = resolve_job(os.getenv("RAILWAY_SERVICE_NAME"), os.getenv("WEATHER_TMAX_JOB"))
     _run([sys.executable, "scripts/railway_bootstrap.py"])
     if job == "api":
         if os.getenv("WEATHER_TMAX_EMBEDDED_SCHEDULER", "").strip().lower() in {"1", "true", "yes", "on"}:
             _start_embedded_scheduler()
-        _run([sys.executable, "scripts/10_start_api.py"])
+        _run_api_forever([sys.executable, "scripts/10_start_api.py"])
         return
     _run(build_api_job_command(job))
 
@@ -74,12 +76,31 @@ def _run(command: list[str]) -> None:
     subprocess.run(command, check=True)
 
 
+def _run_api_forever(command: list[str]) -> None:
+    restart_delay = int(os.getenv("WEATHER_TMAX_API_RESTART_DELAY_SECONDS", "20"))
+    while True:
+        completed = subprocess.run(command, check=False)
+        print(f"API process exited with returncode={completed.returncode}; restarting in {restart_delay}s", flush=True)
+        time.sleep(max(1, restart_delay))
+
+
 def _start_embedded_scheduler() -> None:
     env = os.environ.copy()
     if not env.get("MUNICH_API_BASE_URL"):
         port = env.get("PORT", "8000")
         env["MUNICH_API_BASE_URL"] = f"http://127.0.0.1:{port}"
     subprocess.Popen([sys.executable, "scripts/56_embedded_scheduler.py"], env=env)
+
+
+def _configure_low_memory_runtime() -> None:
+    defaults = {
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+    }
+    for key, value in defaults.items():
+        os.environ.setdefault(key, value)
 
 
 if __name__ == "__main__":

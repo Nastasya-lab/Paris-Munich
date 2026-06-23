@@ -1,6 +1,7 @@
+import os
 import sys
 
-from scripts.railway_entrypoint import build_api_job_command, resolve_job
+from scripts.railway_entrypoint import _configure_low_memory_runtime, build_api_job_command, resolve_job
 
 
 def test_railway_entrypoint_routes_service_names_to_jobs():
@@ -24,3 +25,15 @@ def test_railway_entrypoint_builds_metar_polling_command(monkeypatch):
     assert "900" in command
     assert "--poll-interval-seconds" in command
     assert "30" in command
+
+
+def test_railway_entrypoint_sets_low_memory_thread_defaults(monkeypatch):
+    for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        monkeypatch.delenv(key, raising=False)
+
+    _configure_low_memory_runtime()
+
+    assert os.environ["OMP_NUM_THREADS"] == "1"
+    assert os.environ["OPENBLAS_NUM_THREADS"] == "1"
+    assert os.environ["MKL_NUM_THREADS"] == "1"
+    assert os.environ["NUMEXPR_NUM_THREADS"] == "1"
