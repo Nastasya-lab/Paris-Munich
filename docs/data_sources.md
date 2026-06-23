@@ -4,7 +4,7 @@ The source registry lives in `config/data_sources.yaml`.
 
 Truth target source for EDDM is DWD 10-minute air temperature station `01262` whenever available. DWD hourly and daily products are target fallbacks only.
 
-Feature sources include IEM/AWC METAR, IEM/AWC TAF, honest forecast-as-issued NWP archives, MOSMIX issued forecasts if archived, and optional MostlyRight SDK wrappers.
+Feature sources include IEM/AWC METAR, IEM/AWC TAF, honest forecast-as-issued NWP archives, and MOSMIX issued forecasts if archived.
 
 Historical weather endpoints that do not preserve issued forecast runs are not allowed as training features.
 
