@@ -74,12 +74,13 @@ def build_daily_model_report(
     forecast_log_path: str | Path = "data/logs/forecast_log.jsonl",
     variant_monitoring_path: str | Path = "data/reports/forecast_variant_monitoring.parquet",
 ) -> dict:
-    if mode not in {"preliminary_metar", "dwd_final"}:
-        raise ValueError("mode must be preliminary_metar or dwd_final")
-    if mode == "dwd_final":
+    if mode not in {"preliminary_metar", "dwd_final", "metar_final"}:
+        raise ValueError("mode must be preliminary_metar, dwd_final or metar_final")
+    if mode in {"dwd_final", "metar_final"}:
         return _build_final_report(
             airport=airport,
             target_date_local=target_date_local,
+            mode=mode,
             variant_monitoring_path=variant_monitoring_path,
         )
     return _build_preliminary_report(
@@ -90,27 +91,30 @@ def build_daily_model_report(
     )
 
 
-def _build_final_report(*, airport: str, target_date_local: date, variant_monitoring_path: str | Path) -> dict:
+def _build_final_report(*, airport: str, target_date_local: date, mode: str, variant_monitoring_path: str | Path) -> dict:
     path = Path(variant_monitoring_path)
     if not path.exists():
-        return _empty_report(airport, target_date_local, "dwd_final", "variant_monitoring_missing")
+        return _empty_report(airport, target_date_local, mode, "variant_monitoring_missing")
     frame = pd.read_parquet(path)
     if frame.empty:
-        return _empty_report(airport, target_date_local, "dwd_final", "variant_monitoring_empty")
+        return _empty_report(airport, target_date_local, mode, "variant_monitoring_empty")
     rows = frame[
         (frame["airport"].astype(str) == airport)
         & (frame["target_date_local"].astype(str) == target_date_local.isoformat())
     ].copy()
+    if "target_kind" in rows.columns:
+        expected_kind = "METAR_Tmax" if mode == "metar_final" else "DWD_Tmax"
+        rows = rows[rows["target_kind"].fillna("DWD_Tmax").astype(str) == expected_kind].copy()
     if "forecast_variant" in rows.columns:
         rows = rows[rows["forecast_variant"].isin(REPORT_VARIANTS)].copy()
     if rows.empty:
-        return _empty_report(airport, target_date_local, "dwd_final", "no_scored_rows_for_date")
+        return _empty_report(airport, target_date_local, mode, "no_scored_rows_for_date")
     actual = float(rows["actual_tmax_c"].dropna().iloc[0])
     return _report_from_scored_rows(
         airport=airport,
         target_date_local=target_date_local,
-        mode="dwd_final",
-        truth_source="DWD 10-minute truth",
+        mode=mode,
+        truth_source=_truth_source_from_rows(rows, mode),
         actual_tmax_c=actual,
         rows=rows,
     )
@@ -212,7 +216,9 @@ def _select_variant(summary: list[dict], *, best: bool) -> dict | None:
 
 def _analysis_text(summary: list[dict], best: dict | None, worst: dict | None, mode: str) -> list[str]:
     lines = []
-    if mode == "preliminary_metar":
+    if mode == "metar_final":
+        lines.append("Final report against METAR Tmax truth: use it for the current Munich production target.")
+    elif mode == "preliminary_metar":
         lines.append("Это предварительный отчет: факт взят из оперативного METAR, финальная DWD-оценка может немного отличаться.")
     else:
         lines.append("Это финальный отчет по DWD truth: его можно использовать для накопления статистики качества.")
@@ -232,6 +238,16 @@ def _analysis_text(summary: list[dict], best: dict | None, worst: dict | None, m
         if item["forecast_variant"] == "shadow_safe_blend" and item["coverage_ratio"] < 0.9:
             lines.append("Safe blend выглядит перспективно, но покрывал не весь день, поэтому его нельзя переоценивать по одному отчету.")
     return lines
+
+
+def _truth_source_from_rows(rows: pd.DataFrame, mode: str) -> str:
+    if "truth_source" in rows.columns:
+        values = [str(value) for value in rows["truth_source"].dropna().unique() if str(value)]
+        if values:
+            return values[0] if len(values) == 1 else ", ".join(sorted(values))
+    if mode == "metar_final":
+        return "METAR Tmax truth"
+    return "DWD 10-minute truth"
 
 
 def _score_record_variants(record: dict, actual: float) -> list[dict]:

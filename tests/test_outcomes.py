@@ -86,6 +86,67 @@ def test_update_forecast_outcomes(tmp_path):
     assert out.iloc[0]["forecast_acceptance_cautions"] == "preliminary calibration"
 
 
+def test_update_forecast_outcomes_uses_metar_truth_for_metar_target(tmp_path):
+    log_path = tmp_path / "forecast_log.jsonl"
+    dwd_target_path = tmp_path / "daily_target.parquet"
+    metar_target_path = tmp_path / "metar_tmax_target_EDDM.parquet"
+    output_path = tmp_path / "monitoring.parquet"
+    variant_output_path = tmp_path / "variant_monitoring.parquet"
+    record = {
+        "forecast_id": "metar-f1",
+        "airport": "EDDM",
+        "issue_time_utc": "2026-07-15T10:00:00+00:00",
+        "target_date_local": "2026-07-15",
+        "model_version": "eddm_metar_tmax_icon_d2_spatial_v1",
+        "probability_distribution": {"24": 0.2, "25": 0.8},
+        "expected_tmax_c": 24.8,
+        "median_tmax_c": 25.0,
+        "raw_input_metadata": {"target": "METAR_Tmax"},
+    }
+    log_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    pd.DataFrame(
+        {
+            "airport_icao": ["EDDM"],
+            "target_date_local": ["2026-07-15"],
+            "tmax_c": [31.0],
+            "quality_flags": ["ok"],
+            "source_id": ["dwd.test"],
+        }
+    ).to_parquet(dwd_target_path, index=False)
+    pd.DataFrame(
+        {
+            "airport_icao": ["EDDM"],
+            "target_date_local": ["2026-07-15"],
+            "metar_tmax_c": [25.0],
+            "quality_flags": ["ok"],
+            "source_id": ["metar.test"],
+        }
+    ).to_parquet(metar_target_path, index=False)
+
+    out = update_forecast_outcomes(
+        log_path,
+        dwd_target_path,
+        output_path,
+        variant_output_path=variant_output_path,
+        metar_target_paths={"EDDM": metar_target_path},
+        metar_archive_dir=tmp_path / "data",
+    )
+    status = build_forecast_outcome_status(
+        log_path,
+        dwd_target_path,
+        output_path=None,
+        metar_target_paths={"EDDM": metar_target_path},
+        metar_archive_dir=tmp_path / "data",
+    )
+
+    assert out.iloc[0]["actual_tmax_c"] == 25.0
+    assert out.iloc[0]["target_kind"] == "METAR_Tmax"
+    assert out.iloc[0]["truth_source"] == "metar.test"
+    assert status.iloc[0]["actual_tmax_c"] == 25.0
+    assert status.iloc[0]["target_kind"] == "METAR_Tmax"
+    assert status.iloc[0]["truth_source"] == "metar.test"
+
+
 def test_update_forecast_outcomes_scores_unimodal_shadow_variant(tmp_path):
     log_path = tmp_path / "forecast_log.jsonl"
     target_path = tmp_path / "daily_target.parquet"

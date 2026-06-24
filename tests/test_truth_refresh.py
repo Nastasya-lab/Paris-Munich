@@ -31,11 +31,47 @@ def test_plan_pending_truth_refresh_identifies_completed_pending_dates(tmp_path)
         }
     ).to_parquet(target_path, index=False)
 
-    plan = plan_pending_truth_refresh(log_path, target_path, as_of_date=pd.to_datetime("2026-07-17").date())
+    plan = plan_pending_truth_refresh(
+        log_path,
+        target_path,
+        as_of_date=pd.to_datetime("2026-07-17").date(),
+        metar_archive_dir=tmp_path / "data",
+    )
 
     assert plan["dates_to_refresh"] == ["2026-07-15"]
     assert plan["ready_rows"] == 1
     assert plan["outcome_status_counts"]["pending_truth"] == 1
+
+
+def test_plan_pending_truth_refresh_does_not_fetch_dwd_for_metar_targets(tmp_path):
+    log_path = tmp_path / "forecast_log.jsonl"
+    target_path = tmp_path / "daily_target.parquet"
+    log_path.write_text(
+        json.dumps(
+            {
+                "forecast_id": "f1",
+                "airport": "EDDM",
+                "issue_time_utc": "2026-07-15T06:00:00Z",
+                "target_date_local": "2026-07-15",
+                "model_version": "eddm_metar_tmax_icon_d2_spatial_v1",
+                "raw_input_metadata": {"target": "METAR_Tmax"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    pd.DataFrame(columns=["airport_icao", "target_date_local", "tmax_c", "quality_flags"]).to_parquet(
+        target_path,
+        index=False,
+    )
+
+    plan = plan_pending_truth_refresh(log_path, target_path, as_of_date=date(2026, 7, 17), metar_archive_dir=tmp_path / "data")
+
+    assert plan["dates_to_refresh"] == []
+    assert plan["pending_rows"] == 1
+    assert plan["dwd_pending_rows"] == 0
+    assert plan["metar_pending_rows"] == 1
+    assert plan["ready_rows"] == 0
 
 
 def test_refresh_pending_truth_without_fetch_only_returns_plan(tmp_path):
@@ -47,7 +83,12 @@ def test_refresh_pending_truth_without_fetch_only_returns_plan(tmp_path):
         index=False,
     )
 
-    summary = refresh_pending_truth(forecast_log_path=log_path, target_path=target_path, fetch=False)
+    summary = refresh_pending_truth(
+        forecast_log_path=log_path,
+        target_path=target_path,
+        fetch=False,
+        metar_archive_dir=tmp_path / "data",
+    )
 
     assert summary["fetched_rows"] == 0
     assert summary["plan"]["dates_to_refresh"] == []
@@ -128,6 +169,7 @@ def test_refresh_pending_truth_fetch_merges_target_and_outcomes(tmp_path):
         reports_dir=reports_dir,
         fetch=True,
         as_of_date=date(2026, 7, 17),
+        metar_archive_dir=tmp_path / "data",
         adapter_factory=FakeDWDAdapter,
     )
 
@@ -174,6 +216,7 @@ def test_refresh_pending_truth_fetch_handles_empty_observation_response(tmp_path
         target_path=target_path,
         fetch=True,
         as_of_date=date(2026, 7, 17),
+        metar_archive_dir=tmp_path / "data",
         adapter_factory=EmptyDWDAdapter,
     )
 

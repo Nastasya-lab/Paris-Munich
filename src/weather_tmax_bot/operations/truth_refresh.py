@@ -19,15 +19,25 @@ def plan_pending_truth_refresh(
     target_path: str | Path = "data/processed/daily_target.parquet",
     as_of_date: date | None = None,
     min_lag_days: int = 1,
+    metar_target_paths: dict[str, str | Path] | None = None,
+    metar_archive_dir: str | Path = "data",
 ) -> dict:
     as_of = as_of_date or date.today()
-    status = build_forecast_outcome_status(forecast_log_path=forecast_log_path, target_path=target_path, output_path=None)
+    status = build_forecast_outcome_status(
+        forecast_log_path=forecast_log_path,
+        target_path=target_path,
+        output_path=None,
+        metar_target_paths=metar_target_paths,
+        metar_archive_dir=metar_archive_dir,
+    )
     if status.empty:
         return {
             "as_of_date": as_of.isoformat(),
             "min_lag_days": min_lag_days,
             "dates_to_refresh": [],
             "pending_rows": 0,
+            "dwd_pending_rows": 0,
+            "metar_pending_rows": 0,
             "ready_rows": 0,
             "outcome_status_counts": {},
         }
@@ -39,12 +49,17 @@ def plan_pending_truth_refresh(
             "min_lag_days": min_lag_days,
             "dates_to_refresh": [],
             "pending_rows": 0,
+            "dwd_pending_rows": 0,
+            "metar_pending_rows": 0,
             "ready_rows": 0,
             "outcome_status_counts": status_counts,
         }
+    target_kinds = pending["target_kind"].fillna("DWD_Tmax").astype(str) if "target_kind" in pending.columns else pd.Series(["DWD_Tmax"] * len(pending), index=pending.index)
+    dwd_pending = pending[target_kinds == "DWD_Tmax"].copy()
+    metar_pending_rows = int((target_kinds == "METAR_Tmax").sum())
     cutoff = as_of - timedelta(days=min_lag_days)
-    pending["target_date"] = pd.to_datetime(pending["target_date_local"]).dt.date
-    ready = pending[pending["target_date"] <= cutoff]
+    dwd_pending["target_date"] = pd.to_datetime(dwd_pending["target_date_local"]).dt.date
+    ready = dwd_pending[dwd_pending["target_date"] <= cutoff]
     dates = sorted({value.isoformat() for value in ready["target_date"]})
     return {
         "as_of_date": as_of.isoformat(),
@@ -52,6 +67,8 @@ def plan_pending_truth_refresh(
         "cutoff_date": cutoff.isoformat(),
         "dates_to_refresh": dates,
         "pending_rows": len(pending),
+        "dwd_pending_rows": len(dwd_pending),
+        "metar_pending_rows": metar_pending_rows,
         "ready_rows": len(ready),
         "outcome_status_counts": status_counts,
     }
@@ -69,6 +86,8 @@ def refresh_pending_truth(
     fetch: bool = False,
     as_of_date: date | None = None,
     min_lag_days: int = 1,
+    metar_target_paths: dict[str, str | Path] | None = None,
+    metar_archive_dir: str | Path = "data",
     adapter_factory=DWDAdapter,
 ) -> dict:
     plan = plan_pending_truth_refresh(
@@ -76,6 +95,8 @@ def refresh_pending_truth(
         target_path=target_path,
         as_of_date=as_of_date,
         min_lag_days=min_lag_days,
+        metar_target_paths=metar_target_paths,
+        metar_archive_dir=metar_archive_dir,
     )
     summary = {"airport": airport, "station_id": station_id, "plan": plan, "fetched_rows": 0, "target_rows": None}
     dates = [date.fromisoformat(value) for value in plan["dates_to_refresh"]]
@@ -106,11 +127,15 @@ def refresh_pending_truth(
         target_path=target_path,
         output_path=monitoring_path,
         variant_output_path=variant_monitoring_path,
+        metar_target_paths=metar_target_paths,
+        metar_archive_dir=metar_archive_dir,
     )
     status = build_forecast_outcome_status(
         forecast_log_path=forecast_log_path,
         target_path=target_path,
         output_path=outcome_status_path,
+        metar_target_paths=metar_target_paths,
+        metar_archive_dir=metar_archive_dir,
     )
     build_operational_monitoring_tables(
         monitoring_path=monitoring_path,

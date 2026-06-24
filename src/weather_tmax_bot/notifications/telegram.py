@@ -619,9 +619,14 @@ def _translate_reason(reason: str) -> str:
 
 def format_daily_model_report_message(report: dict) -> str:
     mode = str(report.get("mode", "preliminary_metar"))
-    is_final = mode == "dwd_final"
+    is_final = mode in {"dwd_final", "metar_final"}
     title = "Финальный дневной разбор моделей" if is_final else "Вечерний предварительный разбор моделей"
-    actual_label = "Факт DWD" if is_final else "Предварительный максимум по METAR"
+    if mode == "dwd_final":
+        actual_label = "Факт DWD"
+    elif mode == "metar_final":
+        actual_label = "Факт METAR Tmax"
+    else:
+        actual_label = "Предварительный максимум по METAR"
     lines = [
         f"<b>{escape(title)}: {escape(str(report.get('airport', 'EDDM')))}</b>",
         f"Дата: <b>{escape(str(report.get('target_date_local', 'не указана')))}</b>",
@@ -691,7 +696,8 @@ def format_outcome_update_message(result: dict) -> str:
         "<b>Обновление фактических результатов</b>",
         "Проверка завершена.",
         "",
-        f"Ожидают данных DWD: <b>{status.get('pending_rows', 0)}</b>",
+        f"Ожидают данных DWD: <b>{status.get('dwd_pending_rows', status.get('pending_rows', 0))}</b>",
+        f"Ожидают данных METAR: <b>{status.get('metar_pending_rows', 0)}</b>",
         f"Готовы к оценке: <b>{status.get('ready_rows', 0)}</b>",
         f"Обновление выполнено: {_yes_no(ran_refresh)}",
     ]

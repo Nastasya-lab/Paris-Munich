@@ -56,6 +56,30 @@ def test_final_daily_report_scores_dwd_variant_monitoring(tmp_path):
     assert report["best_variant"]["forecast_variant"] == "production_champion"
 
 
+def test_final_daily_report_scores_metar_variant_monitoring(tmp_path):
+    variant_path = tmp_path / "forecast_variant_monitoring.parquet"
+    dwd_row = _scored_row("f1", "production_champion", 31.0, 31.0, 0.9)
+    dwd_row["target_kind"] = "DWD_Tmax"
+    dwd_row["truth_source"] = "dwd.test"
+    metar_row = _scored_row("f2", "production_champion", 25.0, 25.2, 0.8)
+    metar_row["target_kind"] = "METAR_Tmax"
+    metar_row["truth_source"] = "metar.test"
+    pd.DataFrame([dwd_row, metar_row]).to_parquet(variant_path, index=False)
+
+    report = build_daily_model_report(
+        airport="EDDM",
+        target_date_local=date(2026, 6, 2),
+        mode="metar_final",
+        variant_monitoring_path=variant_path,
+    )
+
+    assert report["status"] == "ok"
+    assert report["actual_tmax_c"] == 25.0
+    assert report["truth_source"] == "metar.test"
+    assert report["best_variant"]["forecast_variant"] == "production_champion"
+    assert "METAR Tmax" in " ".join(report["analysis"])
+
+
 def test_daily_report_handles_fractional_local_issue_hour(tmp_path):
     variant_path = tmp_path / "forecast_variant_monitoring.parquet"
     row = _scored_row("f1", "production_champion", 25.0, 25.3, 0.7)
@@ -159,6 +183,22 @@ def test_daily_report_message_is_human_readable():
     assert "production_champion" in text
     assert "18:00" not in text
     assert "после прихода DWD truth" in text
+
+
+def test_daily_report_message_labels_metar_final():
+    text = format_daily_model_report_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-02",
+            "mode": "metar_final",
+            "actual_tmax_c": 25.0,
+            "truth_source": "metar.test",
+            "summary_by_variant": [],
+        }
+    )
+
+    assert "METAR Tmax" in text
+    assert "DWD truth" not in text
 
 
 def _forecast_record(forecast_id, expected_probs, variants, observed_max):
