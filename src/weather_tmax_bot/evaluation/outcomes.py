@@ -10,7 +10,7 @@ from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, nll_intege
 from weather_tmax_bot.models.distribution import TmaxDistribution
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
-REPORT_VARIANTS = {"production_champion", "shadow_unimodal_pmf"}
+REPORT_VARIANTS = {"production_champion", "shadow_unimodal_pmf", "shadow_spatial_wind_advection"}
 METAR_TARGET_PATHS = {
     "EDDM": Path("data/processed/metar_tmax_target_EDDM.parquet"),
     "LFPB": Path("data/processed/metar_tmax_target_LFPB.parquet"),

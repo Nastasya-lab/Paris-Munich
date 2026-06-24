@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from weather_tmax_bot.features.build_features import build_feature_row
 from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_upside_features
 from weather_tmax_bot.features.nwp_features import build_nwp_features
 from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT, build_spatial_metar_features
+from weather_tmax_bot.features.wind_advection import EDDM_ADVECTION_STATIONS, build_wind_advection_features
 from weather_tmax_bot.models.baselines import ClimatologyBaseline
 from weather_tmax_bot.models.disagreement import assess_model_disagreement
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
@@ -20,6 +22,12 @@ from weather_tmax_bot.models.safe_blend import build_blended_shadow_candidate
 from weather_tmax_bot.temporal.freshness import assess_feature_freshness
 from weather_tmax_bot.temporal.source_compatibility import assess_source_compatibility
 from weather_tmax_bot.utils.time import local_day_bounds_utc
+
+EDDM_WIND_ADVECTION_MODEL_PATH = Path("data/models/eddm_metar_tmax_icon_d2_spatial_wind_advection_v1.joblib")
+EDDM_WIND_ADVECTION_METADATA_PATH = Path("data/models/eddm_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json")
+EDDM_WIND_ADVECTION_VARIANT = "shadow_spatial_wind_advection"
+EDDM_WIND_ADVECTION_LOCAL_HOUR_START = 12
+EDDM_WIND_ADVECTION_LOCAL_HOUR_END = 18
 
 
 def predict_with_climatology(
@@ -340,6 +348,15 @@ def _predict_metar_tmax_model(
             spatial_features.get("spatial_leakage_check_passed", False)
         )
     dist = model.predict_distribution(feature_row)
+    wind_advection_candidate = _predict_eddm_wind_advection_candidate(
+        airport=airport,
+        target_date=target_date,
+        issue_time_utc=issue_time_utc,
+        base_feature_row=feature_row,
+        metar=metar,
+        spatial_metars=spatial_metars,
+        champion=dist,
+    )
     extrapolation = detect_feature_extrapolation(feature_row, model)
     feature_row["extrapolation"] = extrapolation
     freshness = assess_feature_freshness(feature_row, issue_time_utc)
@@ -359,6 +376,17 @@ def _predict_metar_tmax_model(
             },
         }
     }
+    if wind_advection_candidate.get("active") and wind_advection_candidate.get("forecast"):
+        feature_row["forecast_variants"][EDDM_WIND_ADVECTION_VARIANT] = {
+            "description": "Shadow-only EDDM spatial + wind/advection candidate; does not affect operational forecast.",
+            "distribution": wind_advection_candidate["forecast"],
+            "metadata": {
+                "variant_version": wind_advection_candidate.get("model_version"),
+                "local_issue_hour": wind_advection_candidate.get("local_issue_hour"),
+                "target": "METAR_Tmax",
+                "active_local_hour_window": wind_advection_candidate.get("active_local_hour_window"),
+            },
+        }
     feature_row["forecast_components"] = {
         "base_model": {
             "model_version": active_model_version,
@@ -374,6 +402,7 @@ def _predict_metar_tmax_model(
             "model_tmax_c": feature_row.get("model_tmax_c"),
             "spatial_available_station_count": feature_row.get("spatial_available_station_count"),
         },
+        "spatial_wind_advection_candidate": wind_advection_candidate,
     }
     warnings = [
         *extrapolation.get("warnings", []),
@@ -400,6 +429,88 @@ def _add_metar_tmax_nwp_relative_features(nwp_features: dict, metar_features: di
     nwp_features["nwp_future_minus_current_max_c"] = (
         None if pd.isna(future) or pd.isna(current_max) else float(future) - float(current_max)
     )
+
+
+def _predict_eddm_wind_advection_candidate(
+    *,
+    airport: str,
+    target_date: date,
+    issue_time_utc: datetime,
+    base_feature_row: dict,
+    metar: pd.DataFrame,
+    spatial_metars: dict[str, pd.DataFrame],
+    champion,
+) -> dict:
+    local_hour = int(pd.Timestamp(issue_time_utc).tz_convert("Europe/Berlin").hour)
+    active_window = [EDDM_WIND_ADVECTION_LOCAL_HOUR_START, EDDM_WIND_ADVECTION_LOCAL_HOUR_END]
+    base = {
+        "enabled": airport.upper() == "EDDM",
+        "active": False,
+        "status": "shadow_only_does_not_affect_operational_forecast",
+        "active_local_hour_window": active_window,
+        "local_issue_hour": local_hour,
+        "model_version": None,
+        "reason": None,
+    }
+    if airport.upper() != "EDDM":
+        return {**base, "enabled": False, "reason": "airport_not_supported"}
+    if not (EDDM_WIND_ADVECTION_LOCAL_HOUR_START <= local_hour <= EDDM_WIND_ADVECTION_LOCAL_HOUR_END):
+        return {**base, "reason": "outside_spatial_wind_advection_local_hour_window"}
+    if not EDDM_WIND_ADVECTION_MODEL_PATH.exists():
+        return {**base, "reason": f"missing_model:{EDDM_WIND_ADVECTION_MODEL_PATH}"}
+    try:
+        station_metars = {"EDDM": metar, **spatial_metars}
+        advection_features = build_wind_advection_features(
+            station_metars,
+            target_date_local=target_date,
+            issue_time_utc=issue_time_utc,
+            timezone_name="Europe/Berlin",
+            stations=EDDM_ADVECTION_STATIONS,
+            target_station="EDDM",
+        )
+        if not advection_features.get("adv_leakage_check_passed", False):
+            return {**base, "reason": "wind_advection_leakage_check_failed"}
+        model = joblib.load(EDDM_WIND_ADVECTION_MODEL_PATH)
+        metadata = _load_json(EDDM_WIND_ADVECTION_METADATA_PATH)
+        feature_row = {**base_feature_row, **advection_features}
+        dist = model.predict_distribution(feature_row)
+        return {
+            **base,
+            "active": True,
+            "reason": "active_midday_spatial_wind_advection_candidate",
+            "model_version": metadata.get("model_version", getattr(model, "model_version", EDDM_WIND_ADVECTION_MODEL_PATH.stem)),
+            "forecast": dist.to_payload(),
+            "comparison_to_champion": _distribution_comparison(dist, champion),
+            "wind_advection_features": {
+                "available_station_count": advection_features.get("adv_available_station_count"),
+                "mean_wind_speed_latest_kt": advection_features.get("adv_mean_wind_speed_latest_kt"),
+                "mean_temp_trend_1h": advection_features.get("adv_mean_temp_trend_1h"),
+                "mean_temp_trend_3h": advection_features.get("adv_mean_temp_trend_3h"),
+                "mean_dewpoint_trend_3h": advection_features.get("adv_mean_dewpoint_trend_3h"),
+                "mean_pressure_tendency_3h": advection_features.get("adv_mean_pressure_tendency_3h"),
+                "any_cold_advection_signal": advection_features.get("adv_any_cold_advection_signal"),
+                "any_warm_advection_signal": advection_features.get("adv_any_warm_advection_signal"),
+                "any_frontal_passage_signal": advection_features.get("adv_any_frontal_passage_signal"),
+                "neighbor_mean_minus_eddm_temp_trend_1h": advection_features.get("adv_neighbor_mean_minus_eddm_temp_trend_1h"),
+                "max_feature_knowledge_time_utc": advection_features.get("adv_max_feature_knowledge_time_utc"),
+            },
+            "advection_stations": {
+                station: {
+                    "available": advection_features.get(f"adv_{station.lower()}_available"),
+                    "wind_dir_latest_deg": advection_features.get(f"adv_{station.lower()}_wind_dir_latest_deg"),
+                    "wind_speed_latest_kt": advection_features.get(f"adv_{station.lower()}_wind_speed_latest_kt"),
+                    "temp_trend_1h": advection_features.get(f"adv_{station.lower()}_temp_trend_1h"),
+                    "dewpoint_trend_3h": advection_features.get(f"adv_{station.lower()}_dewpoint_trend_3h"),
+                    "pressure_tendency_3h": advection_features.get(f"adv_{station.lower()}_pressure_tendency_3h"),
+                    "cold_advection_signal": advection_features.get(f"adv_{station.lower()}_cold_advection_signal"),
+                    "warm_advection_signal": advection_features.get(f"adv_{station.lower()}_warm_advection_signal"),
+                    "frontal_passage_signal": advection_features.get(f"adv_{station.lower()}_frontal_passage_signal"),
+                }
+                for station in EDDM_ADVECTION_STATIONS
+            },
+        }
+    except Exception as exc:
+        return {**base, "reason": f"spatial_wind_advection_candidate_unavailable:{exc}"}
 
 
 def _annotate_metar_source(feature_row: dict, metar: pd.DataFrame) -> None:
@@ -499,6 +610,13 @@ def _distribution_comparison(challenger, champion) -> dict:
 def _load_optional(path: str | Path) -> pd.DataFrame:
     p = Path(path)
     return pd.read_parquet(p) if p.exists() else pd.DataFrame()
+
+
+def _load_json(path: str | Path) -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def _load_metar_for_issue(airport: str, target_date: date, issue_time_utc: datetime) -> pd.DataFrame:

@@ -88,6 +88,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         "",
         *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
+        *_format_spatial_wind_advection_candidate(forecast.get("forecast_components", {})),
         *_format_intraday_summary(forecast.get("forecast_components", {})),
         *_format_growth_potential_summary(forecast.get("forecast_components", {})),
         "",
@@ -182,6 +183,39 @@ def _format_expected(component: dict) -> str:
     return "недоступен" if value is None else f"{float(value):.1f} °C"
 
 
+def _format_spatial_wind_advection_candidate(components: dict) -> list[str]:
+    candidate = (components or {}).get("spatial_wind_advection_candidate") or {}
+    if not candidate or not candidate.get("enabled", False):
+        return []
+    if not candidate.get("active", False):
+        reason = str(candidate.get("reason") or "")
+        if reason == "outside_spatial_wind_advection_local_hour_window":
+            return []
+        return [
+            "",
+            "<b>EDDM spatial + wind/advection shadow</b>",
+            "Diagnostic only: does not affect the operational forecast.",
+            f"Status: inactive ({escape(reason or 'unknown reason')})",
+        ]
+    forecast = candidate.get("forecast") or {}
+    thresholds = forecast.get("threshold_probabilities") or {}
+    comparison = candidate.get("comparison_to_champion") or {}
+    wind = candidate.get("wind_advection_features") or {}
+    return [
+        "",
+        "<b>EDDM spatial + wind/advection shadow</b>",
+        "Diagnostic only: does not affect the operational forecast. Active 12:00-18:00 local.",
+        f"Expected METAR Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} C</b> ({_signed_c(comparison.get('expected_tmax_delta_c'))} vs production)",
+        f"Most likely bin: <b>{int(forecast.get('most_likely_integer_c', 0))} C</b>",
+        f"Top bins: {_format_compact_bins(forecast.get('probabilities_by_integer_c', {}), limit=6)}",
+        f"P(Tmax >= 25 C): {float(thresholds.get('ge_25', 0.0)):.1%}",
+        f"P(Tmax >= 30 C): {float(thresholds.get('ge_30', 0.0)):.1%}",
+        f"Advection stations available: {int(wind.get('available_station_count') or 0)}",
+        f"Mean temp trend 1h: {_fmt_optional_float(wind.get('mean_temp_trend_1h'))} C",
+        f"Front signal: {_yes_no(wind.get('any_frontal_passage_signal'))}",
+    ]
+
+
 def _format_shadow_summary(components: dict) -> list[str]:
     shadow = (components or {}).get("shadow_mode") or {}
     if not shadow:
@@ -235,6 +269,18 @@ def _format_compact_bins(probabilities: dict, limit: int = 4) -> str:
     )[:limit]
     rows.sort()
     return ", ".join(f"{bin_c:+d} °C {probability:.1%}" for bin_c, probability in rows)
+
+
+def _fmt_optional_float(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if parsed != parsed:
+        return "n/a"
+    return f"{parsed:.1f}"
 
 
 def _format_ml_shadow_summary(components: dict) -> list[str]:
@@ -468,6 +514,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
     lines.extend(["", *_format_latest_metar_record(latest_metar)])
     lines.extend(["", *_format_distribution_change(payload, previous)])
     lines.extend(_format_source_compatibility(payload.get("source_compatibility", {})))
+    lines.extend(_format_spatial_wind_advection_candidate(forecast_components))
     lines.extend(_format_growth_potential_summary(forecast_components))
     shadow_final = {}
     shadow_intraday = shadow.get("intraday_update") or {}

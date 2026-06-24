@@ -150,6 +150,25 @@
         "brier_upside_ge_2c": 0.04296301660076079,
         "brier_upside_ge_3c": 0.03587977056451663
       }
+    },
+    {
+      "version": "eddm_metar_tmax_icon_d2_spatial_wind_advection_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\eddm_metar_tmax_icon_d2_spatial_wind_advection_v1.joblib",
+      "metadata_path": "data\\models\\eddm_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json",
+      "metrics": {
+        "model_variant": "eddm_metar_icon_d2_spatial_wind_advection",
+        "rows": 496,
+        "distinct_days": 62,
+        "mae_expected": 0.6773753381424332,
+        "rmse_expected": 1.1068362560547844,
+        "bias_expected": 0.02435937855794577,
+        "mean_nll": 1.1868400231815124,
+        "mean_crps": 0.028782314203456085,
+        "brier_upside_ge_1c": 0.05152640075160029,
+        "brier_upside_ge_2c": 0.0413974272844435,
+        "brier_upside_ge_3c": 0.034119251014225326
+      }
     }
   ],
   "promotion": {

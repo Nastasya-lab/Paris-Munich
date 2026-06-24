@@ -133,6 +133,48 @@ def test_operational_cycle_message_hides_challenger_and_keeps_growth_potential()
     assert "blended shadow" not in text
 
 
+def test_operational_cycle_message_includes_spatial_wind_advection_shadow():
+    text = telegram.format_operational_cycle_message(
+        {
+            "accepted": True,
+            "airport": "EDDM",
+            "forecast": {
+                "expected_tmax_c": 29.1,
+                "median_tmax_c": 29.0,
+                "most_likely_integer_c": 29,
+                "intervals": {"80": [28.0, 31.0]},
+                "probabilities_by_integer_c": {"28": 0.2, "29": 0.5, "30": 0.3},
+                "threshold_probabilities": {"ge_20": 1.0, "ge_25": 1.0, "ge_30": 0.3, "le_0": 0.0},
+                "forecast_components": {
+                    "spatial_wind_advection_candidate": {
+                        "enabled": True,
+                        "active": True,
+                        "forecast": {
+                            "expected_tmax_c": 29.4,
+                            "most_likely_integer_c": 29,
+                            "probabilities_by_integer_c": {"28": 0.1, "29": 0.6, "30": 0.3},
+                            "threshold_probabilities": {"ge_25": 1.0, "ge_30": 0.3},
+                        },
+                        "comparison_to_champion": {"expected_tmax_delta_c": 0.3},
+                        "wind_advection_features": {
+                            "available_station_count": 4,
+                            "mean_temp_trend_1h": 0.25,
+                            "any_frontal_passage_signal": False,
+                        },
+                    }
+                },
+            },
+            "forecast_quality": {"status": "ok", "reasons": []},
+            "forecast_acceptance": {"cautions": []},
+        }
+    )
+
+    assert "EDDM spatial + wind/advection shadow" in text
+    assert "Diagnostic only" in text
+    assert "Expected METAR Tmax: <b>29.4 C</b>" in text
+    assert "P(Tmax >= 30 C): 30.0%" in text
+
+
 def test_metar_event_message_includes_integer_bin_probability_changes():
     text = telegram.format_metar_event_message(
         {
