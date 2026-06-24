@@ -7,7 +7,6 @@ __pycache__
 .venv
 venv
 
-data/cache
 data/**
 !data/
 !data/models/
@@ -44,9 +43,5 @@ data/**
 !data/models/quantile_mvp_retrain_20260529.calibrator.metadata.json
 !data/models/quantile_mvp_retrain_20260529.joblib
 !data/models/quantile_mvp_retrain_20260529.metadata.json
-data/raw/dwd/*.zip
-data/logs/*.jsonl
-data/reports/test_*.json
-data/reports/live_operational_*.json
 
 docs/**/*.png
