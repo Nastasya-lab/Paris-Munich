@@ -16,8 +16,13 @@ def build_data_lineage(feature_snapshot: dict) -> dict:
                 "knowledge_time_utc": _string_or_none(feature_snapshot.get("max_nwp_knowledge_time_utc")),
             }
         )
+    truth_source = (
+        "iem.metar.archive.EDDM / awc.metar.live.EDDM"
+        if feature_snapshot.get("target") == "METAR_Tmax"
+        else "dwd.10min.air_temperature.01262"
+    )
     return {
-        "truth_source": "dwd.10min.air_temperature.01262",
+        "truth_source": truth_source,
         "metar_source_id": _string_or_none(feature_snapshot.get("latest_metar_source_id")),
         "metar_latest_time_utc": _string_or_none(feature_snapshot.get("latest_metar_time_utc")),
         "taf_source_id": _string_or_none(feature_snapshot.get("latest_taf_source_id")),

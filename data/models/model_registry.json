@@ -1,5 +1,5 @@
 {
-  "active_model_version": "nwp_residual_icon_d2_20260531",
+  "active_model_version": "eddm_metar_tmax_icon_d2_spatial_v1",
   "active_calibrator_version": null,
   "entries": [
     {
@@ -131,17 +131,41 @@
         "brier_upside_ge_3c": 0.04869286338738586,
         "coverage_80": 0.9692622950819673
       }
+    },
+    {
+      "version": "eddm_metar_tmax_icon_d2_spatial_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\eddm_metar_tmax_icon_d2_spatial_v1.joblib",
+      "metadata_path": "data\\models\\eddm_metar_tmax_icon_d2_spatial_v1.metadata.json",
+      "metrics": {
+        "model_variant": "eddm_metar_icon_d2_spatial",
+        "rows": 496,
+        "distinct_days": 62,
+        "mae_expected": 0.7816447450026277,
+        "rmse_expected": 1.2666273290084882,
+        "bias_expected": 0.004244358994476584,
+        "mean_nll": 1.1521624236230414,
+        "mean_crps": 0.029048641035725485,
+        "brier_upside_ge_1c": 0.05166536730056479,
+        "brier_upside_ge_2c": 0.04296301660076079,
+        "brier_upside_ge_3c": 0.03587977056451663
+      }
     }
   ],
   "promotion": {
-    "reason": "nwp_residual_holdout_gates_passed",
+    "reason": "manual_promote_eddm_metar_target_spatial",
     "metrics": {
-      "rows": 1029,
-      "mae_expected": 0.7074662225082066,
-      "rmse_expected": 0.9420635785396765,
-      "bias_expected": 0.12781171635645297,
-      "mean_nll": 1.4040034420503755,
-      "mean_crps": 0.006756439782960472
+      "model_variant": "eddm_metar_icon_d2_spatial",
+      "rows": 496,
+      "distinct_days": 62,
+      "mae_expected": 0.7816447450026277,
+      "rmse_expected": 1.2666273290084882,
+      "bias_expected": 0.004244358994476584,
+      "mean_nll": 1.1521624236230414,
+      "mean_crps": 0.029048641035725485,
+      "brier_upside_ge_1c": 0.05166536730056479,
+      "brier_upside_ge_2c": 0.04296301660076079,
+      "brier_upside_ge_3c": 0.03587977056451663
     }
   }
 }

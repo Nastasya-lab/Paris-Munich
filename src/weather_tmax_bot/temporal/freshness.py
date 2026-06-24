@@ -27,12 +27,16 @@ def assess_feature_freshness(
             thresholds["metar"],
             bool(feature_snapshot.get("metar_missing", False)),
         ),
-        "taf": _status(
-            "TAF",
-            feature_snapshot.get("latest_taf_issue_time_utc"),
-            issue_time_utc,
-            thresholds["taf"],
-            bool(feature_snapshot.get("taf_missing", False)),
+        "taf": (
+            _not_required_status("TAF")
+            if feature_snapshot.get("taf_not_required")
+            else _status(
+                "TAF",
+                feature_snapshot.get("latest_taf_issue_time_utc"),
+                issue_time_utc,
+                thresholds["taf"],
+                bool(feature_snapshot.get("taf_missing", False)),
+            )
         ),
         "nwp": _status(
             "NWP",
@@ -44,6 +48,17 @@ def assess_feature_freshness(
     }
     warnings = [status["warning"] for status in statuses.values() if status.get("warning")]
     return {"statuses": statuses, "warnings": warnings}
+
+
+def _not_required_status(label: str) -> dict:
+    return {
+        "state": "not_required",
+        "latest_time_utc": None,
+        "age_hours": None,
+        "max_age_hours": None,
+        "warning": None,
+        "label": label,
+    }
 
 
 def assess_archive_freshness(root: str | Path = ".", issue_time_utc: datetime | None = None) -> dict:

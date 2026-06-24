@@ -7,7 +7,9 @@ import joblib
 import pandas as pd
 
 from weather_tmax_bot.features.build_features import build_feature_row
-from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT
+from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_upside_features
+from weather_tmax_bot.features.nwp_features import build_nwp_features
+from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT, build_spatial_metar_features
 from weather_tmax_bot.models.baselines import ClimatologyBaseline
 from weather_tmax_bot.models.disagreement import assess_model_disagreement
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
@@ -57,6 +59,46 @@ def predict_best_available(
             nwp=nwp,
         )
         model = load_model(resolved_model_path)
+        runtime_model_version = active.get("active_model_version") or Path(resolved_model_path).stem
+        if _is_metar_tmax_model(model):
+            try:
+                return _predict_metar_tmax_model(
+                    model=model,
+                    active_model_version=runtime_model_version,
+                    airport=airport,
+                    target_date=target_date,
+                    issue_time_utc=issue_time_utc,
+                    metar=metar,
+                    spatial_metars=spatial_metars,
+                    nwp=nwp,
+                )
+            except (FileNotFoundError, ValueError, KeyError) as exc:
+                warnings.append(f"Active METAR Tmax model could not use current features: {exc}; legacy Munich model fallback used.")
+                legacy_path = Path("data/models/nwp_residual_icon_d2_20260531.joblib")
+                if legacy_path.exists():
+                    model = load_model(legacy_path)
+                    runtime_model_version = legacy_path.stem
+                else:
+                    warnings.append("Legacy Munich model unavailable; climatology fallback used.")
+                    dist = predict_with_climatology(target_date, daily_target_path=daily_target_path)
+                    payload = dist.to_payload()
+                    return dist, {
+                        "model_version": "climatology_mvp",
+                        "feature_snapshot": {
+                            "airport_icao": airport,
+                            "target_date_local": target_date.isoformat(),
+                            "metar_missing": metar.empty,
+                            "nwp_missing": nwp.empty,
+                            "forecast_variants": {
+                                "production_champion": {
+                                    "description": "Climatology fallback distribution.",
+                                    "distribution": payload,
+                                    "metadata": {"variant_version": "climatology_mvp"},
+                                }
+                            },
+                        },
+                        "warnings": warnings,
+                    }
         observed_max = feature_row.get("observed_max_so_far_from_metar")
         try:
             dist = model.predict_distribution(pd.DataFrame([feature_row]), observed_max_so_far=observed_max)
@@ -230,13 +272,165 @@ def predict_best_available(
         if feature_row.get("taf_missing", True):
             warnings.append("TAF missing for this as-of feature view.")
         return dist, {
-            "model_version": active.get("active_model_version") or Path(resolved_model_path).stem,
+            "model_version": runtime_model_version,
             "feature_snapshot": feature_row,
             "warnings": warnings,
         }
     dist = predict_with_climatology(target_date, daily_target_path=daily_target_path)
     warnings.append("Quantile model unavailable; climatology MVP distribution used.")
     return dist, {"model_version": "climatology_mvp", "feature_snapshot": {}, "warnings": warnings}
+
+
+def _is_metar_tmax_model(model) -> bool:
+    return model.__class__.__name__ in {"IconD2MetarTmaxEnsemble", "MetarTmaxUpsideModel"}
+
+
+def _predict_metar_tmax_model(
+    *,
+    model,
+    active_model_version: str,
+    airport: str,
+    target_date: date,
+    issue_time_utc: datetime,
+    metar: pd.DataFrame,
+    spatial_metars: dict[str, pd.DataFrame],
+    nwp: pd.DataFrame,
+) -> tuple[object, dict]:
+    timezone_name = "Europe/Berlin" if airport.upper() == "EDDM" else "Europe/Paris"
+    feature_row = build_current_metar_upside_features(
+        metar,
+        airport_icao=airport,
+        target_date_local=target_date,
+        issue_time_utc=issue_time_utc,
+        timezone_name=timezone_name,
+    )
+    _annotate_metar_source(feature_row, metar)
+    feature_row["taf_not_required"] = True
+    feature_row["taf_missing"] = False
+    feature_row["issue_schedule_offset_minutes"] = _local_issue_schedule_offset_minutes(
+        issue_time_utc,
+        timezone_name,
+        scheduled_hours=[6, 8, 10, 12, 14, 16, 18, 20],
+    )
+    nwp_features = build_nwp_features(nwp, issue_time_utc)
+    _add_metar_tmax_nwp_relative_features(nwp_features, feature_row)
+    feature_row.update(nwp_features)
+    feature_row["max_feature_knowledge_time_utc"] = _max_timestamp_string(
+        feature_row.get("max_feature_knowledge_time_utc"),
+        feature_row.get("max_nwp_knowledge_time_utc"),
+    )
+    if hasattr(model, "residuals_by_hour") and pd.isna(feature_row.get("model_tmax_c")):
+        raise FileNotFoundError("ICON-D2 features are required for the active METAR Tmax ensemble")
+    stations = list(SPATIAL_STATIONS_BY_AIRPORT.get(airport.upper(), ()))
+    if stations:
+        spatial_features = build_spatial_metar_features(
+            feature_row,
+            spatial_metars,
+            target_date_local=target_date,
+            issue_time_utc=issue_time_utc,
+            timezone_name=timezone_name,
+            stations=stations,
+        )
+        feature_row.update(spatial_features)
+        feature_row["max_feature_knowledge_time_utc"] = _max_timestamp_string(
+            feature_row.get("max_feature_knowledge_time_utc"),
+            spatial_features.get("spatial_max_feature_knowledge_time_utc"),
+        )
+        feature_row["leakage_check_passed"] = bool(feature_row.get("leakage_check_passed", False)) and bool(
+            spatial_features.get("spatial_leakage_check_passed", False)
+        )
+    dist = model.predict_distribution(feature_row)
+    extrapolation = detect_feature_extrapolation(feature_row, model)
+    feature_row["extrapolation"] = extrapolation
+    freshness = assess_feature_freshness(feature_row, issue_time_utc)
+    feature_row["freshness"] = freshness["statuses"]
+    source_compatibility = assess_source_compatibility(feature_row)
+    feature_row["source_compatibility"] = source_compatibility["sources"]
+    feature_row["target"] = "METAR_Tmax"
+    feature_row["target_description"] = "daily maximum temperature reported by EDDM METAR"
+    feature_row["forecast_variants"] = {
+        "production_champion": {
+            "description": "Operational EDDM METAR Tmax distribution.",
+            "distribution": dist.to_payload(),
+            "metadata": {
+                "variant_version": active_model_version,
+                "local_issue_hour": feature_row.get("local_issue_hour"),
+                "target": "METAR_Tmax",
+            },
+        }
+    }
+    feature_row["forecast_components"] = {
+        "base_model": {
+            "model_version": active_model_version,
+            "expected_tmax_c": dist.expected_tmax_c,
+            "target": "METAR_Tmax",
+        },
+        "metar_tmax_model": {
+            "active": True,
+            "model_version": active_model_version,
+            "local_issue_hour": feature_row.get("local_issue_hour"),
+            "current_metar_max_c": feature_row.get("current_metar_max_c"),
+            "latest_metar_temp_c": feature_row.get("latest_metar_temp_c"),
+            "model_tmax_c": feature_row.get("model_tmax_c"),
+            "spatial_available_station_count": feature_row.get("spatial_available_station_count"),
+        },
+    }
+    warnings = [
+        *extrapolation.get("warnings", []),
+        *freshness.get("warnings", []),
+        *source_compatibility.get("warnings", []),
+        "EDDM METAR Tmax model used; target is METAR Tmax, not DWD official Tmax.",
+    ]
+    if feature_row.get("nwp_missing", True):
+        warnings.append("NWP forecast-as-issued archive not yet available.")
+    return dist, {
+        "model_version": active_model_version,
+        "feature_snapshot": feature_row,
+        "warnings": warnings,
+    }
+
+
+def _add_metar_tmax_nwp_relative_features(nwp_features: dict, metar_features: dict) -> None:
+    model_tmax = nwp_features.get("model_tmax_c")
+    current_max = metar_features.get("current_metar_max_c")
+    future = nwp_features.get("model_future_temp_max_c")
+    nwp_features["nwp_model_minus_current_max_c"] = (
+        None if pd.isna(model_tmax) or pd.isna(current_max) else float(model_tmax) - float(current_max)
+    )
+    nwp_features["nwp_future_minus_current_max_c"] = (
+        None if pd.isna(future) or pd.isna(current_max) else float(future) - float(current_max)
+    )
+
+
+def _annotate_metar_source(feature_row: dict, metar: pd.DataFrame) -> None:
+    latest_time = pd.to_datetime(feature_row.get("latest_metar_time_utc"), utc=True, errors="coerce")
+    if pd.isna(latest_time) or metar.empty:
+        feature_row["metar_missing"] = True
+        return
+    frame = metar.copy()
+    frame["observation_time_utc"] = pd.to_datetime(frame["observation_time_utc"], utc=True, errors="coerce")
+    matches = frame[frame["observation_time_utc"] == latest_time]
+    latest = matches.iloc[-1] if not matches.empty else frame.sort_values("observation_time_utc").iloc[-1]
+    feature_row["latest_metar_source_id"] = latest.get("source_id")
+    feature_row["max_metar_knowledge_time_utc"] = feature_row.get("max_feature_knowledge_time_utc")
+    feature_row["metar_missing"] = False
+
+
+def _max_timestamp_string(*values) -> str | None:
+    timestamps = pd.to_datetime([value for value in values if value is not None], utc=True, errors="coerce")
+    timestamps = [timestamp for timestamp in timestamps if not pd.isna(timestamp)]
+    if not timestamps:
+        return None
+    return max(pd.Timestamp(timestamp) for timestamp in timestamps).isoformat()
+
+
+def _local_issue_schedule_offset_minutes(issue_time_utc: datetime, timezone_name: str, scheduled_hours: list[int]) -> float:
+    issue_local = pd.Timestamp(issue_time_utc).tz_convert(timezone_name)
+    if issue_local.minute == 30 and issue_local.second == 0:
+        return 0.0
+    actual = issue_local.hour * 60 + issue_local.minute + issue_local.second / 60.0
+    scheduled = [hour * 60 for hour in scheduled_hours]
+    return float(min(abs(actual - value) for value in scheduled))
 
 
 def _predict_intraday_ml_shadow(feature_row: dict, model_path: str | Path = "data/models/intraday_ml_core_challenger_v1.joblib"):
