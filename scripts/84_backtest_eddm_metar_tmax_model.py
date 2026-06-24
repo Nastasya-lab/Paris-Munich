@@ -13,6 +13,11 @@ from weather_tmax_bot.data.storage import write_parquet
 from weather_tmax_bot.evaluation.metrics import brier, crps_discrete, mae, nll_integer_bin, rmse
 from weather_tmax_bot.features.metar_upside_dataset import build_metar_remaining_upside_dataset
 from weather_tmax_bot.features.spatial_metar import EDDM_SPATIAL_STATIONS, add_spatial_metar_features_to_frame, spatial_feature_columns
+from weather_tmax_bot.features.wind_advection import (
+    EDDM_ADVECTION_STATIONS,
+    add_wind_advection_features_to_frame,
+    wind_advection_feature_columns,
+)
 from weather_tmax_bot.models.distribution import TmaxDistribution
 from weather_tmax_bot.models.metar_tmax_model import (
     DEFAULT_METAR_TMAX_FEATURES,
@@ -29,6 +34,7 @@ AIRPORT = "EDDM"
 TIMEZONE = "Europe/Berlin"
 MODEL_VERSION = "eddm_metar_tmax_icon_d2_candidate_v1"
 SPATIAL_MODEL_VERSION = "eddm_metar_tmax_icon_d2_spatial_v1"
+WIND_ADVECTION_MODEL_VERSION = "eddm_metar_tmax_icon_d2_spatial_wind_advection_v1"
 LOCAL_10_17_HOURS = {10, 12, 14, 16}
 
 ENHANCED_INTRADAY_FEATURES = [
@@ -128,6 +134,28 @@ def main() -> None:
             modeling_frame = _build_spatial_frame(joined, args.neighbor_dir, neighbor_stations)
             write_parquet(modeling_frame, args.spatial_dataset_output)
 
+    wind_advection_enabled = bool(args.include_wind_advection) and spatial_enabled
+    advection_stations = list(args.advection_station)
+    missing_advection_stations = [
+        station
+        for station in advection_stations
+        if not (Path(args.neighbor_dir) / f"metar_iem_{station}.parquet").exists()
+    ]
+    if wind_advection_enabled and missing_advection_stations:
+        wind_advection_enabled = False
+    if wind_advection_enabled:
+        wind_path = Path(args.wind_advection_dataset_output)
+        if args.reuse_wind_advection_dataset and wind_path.exists():
+            candidate_frame = pd.read_parquet(wind_path)
+            if _same_modeling_keys(modeling_frame, candidate_frame):
+                modeling_frame = candidate_frame
+            else:
+                modeling_frame = _build_wind_advection_frame(modeling_frame, args.neighbor_dir, advection_stations)
+                write_parquet(modeling_frame, args.wind_advection_dataset_output)
+        else:
+            modeling_frame = _build_wind_advection_frame(modeling_frame, args.neighbor_dir, advection_stations)
+            write_parquet(modeling_frame, args.wind_advection_dataset_output)
+
     frame = prepare_metar_tmax_dataset(modeling_frame)
     frame["target_date_local"] = pd.to_datetime(frame["target_date_local"], errors="coerce").dt.date
     frame["season"] = frame["target_date_local"].map(_season)
@@ -150,6 +178,9 @@ def main() -> None:
     spatial_ensemble = None
     spatial_weight = None
     spatial_features = []
+    wind_advection_ensemble = None
+    wind_advection_weight = None
+    wind_advection_features = []
     if spatial_enabled:
         spatial_features = base_features + spatial_feature_columns(neighbor_stations)
         spatial_model = _fit_model(train, calibration, spatial_features, args.min_train_rows, args.max_iter)
@@ -160,6 +191,16 @@ def main() -> None:
             spatial_weight,
             SPATIAL_MODEL_VERSION,
         )
+    if wind_advection_enabled:
+        wind_advection_features = spatial_features + wind_advection_feature_columns(advection_stations, target_station=AIRPORT)
+        wind_advection_model = _fit_model(train, calibration, wind_advection_features, args.min_train_rows, args.max_iter)
+        wind_advection_weight = _optimize_ml_weight(calibration, wind_advection_model, residuals_for_calibration)
+        wind_advection_ensemble = IconD2MetarTmaxEnsemble(
+            wind_advection_model,
+            residuals_for_test,
+            wind_advection_weight,
+            WIND_ADVECTION_MODEL_VERSION,
+        )
 
     current_production_model = joblib.load(args.current_production_model)
     scored = _score_holdout(
@@ -167,6 +208,7 @@ def main() -> None:
         current_production_model=current_production_model,
         base_ensemble=base_ensemble,
         spatial_ensemble=spatial_ensemble,
+        wind_advection_ensemble=wind_advection_ensemble,
     )
     summary = _summary(scored, ["model_variant"])
     by_hour = _summary(scored, ["model_variant", "local_issue_hour"])
@@ -184,11 +226,15 @@ def main() -> None:
         split=split,
         base_features=base_features,
         spatial_features=spatial_features,
+        wind_advection_features=wind_advection_features,
         base_ensemble=base_ensemble,
         spatial_ensemble=spatial_ensemble,
+        wind_advection_ensemble=wind_advection_ensemble,
         base_weight=base_weight,
         spatial_weight=spatial_weight,
+        wind_advection_weight=wind_advection_weight,
         neighbor_stations=neighbor_stations,
+        advection_stations=advection_stations,
     )
 
     report = {
@@ -200,7 +246,7 @@ def main() -> None:
         "target": "daily maximum temperature reported by EDDM METAR",
         "current_production_comparator": {
             "model_path": args.current_production_model,
-            "target_mismatch": "trained for DWD/official Tmax, scored here against EDDM METAR Tmax",
+            "target": "scored against EDDM METAR Tmax using the current configured production artifact",
         },
         "target_rows": int(len(target)),
         "dataset_rows": int(len(dataset)),
@@ -214,8 +260,13 @@ def main() -> None:
         "missing_neighbor_stations": missing_neighbors,
         "neighbor_stations": neighbor_stations,
         "spatial_feature_count": len(spatial_features) if spatial_enabled else 0,
+        "wind_advection_enabled": wind_advection_enabled,
+        "missing_advection_stations": missing_advection_stations,
+        "advection_stations": advection_stations,
+        "wind_advection_feature_count": len(wind_advection_features) if wind_advection_enabled else 0,
         "base_ml_weight": base_weight,
         "spatial_ml_weight": spatial_weight,
+        "wind_advection_ml_weight": wind_advection_weight,
         "summary": json.loads(summary.to_json(orient="records")),
         "summary_10_17_local": json.loads(by_hour_10_17.to_json(orient="records")),
         "recommendation": recommendation,
@@ -225,7 +276,7 @@ def main() -> None:
                 if not production_artifact
                 else "Production artifact was saved because --save-production-model was requested."
             ),
-            "Current Munich production comparator is DWD-targeted and evaluated here on METAR target to expose target mismatch.",
+            "Current Munich production comparator is evaluated on the same METAR Tmax target.",
             "Issue-hour window 10-17 local maps to configured local issue hours 10, 12, 14, 16.",
             "TAF is not used in the EDDM METAR-target candidate, matching the current Paris METAR-target approach.",
         ],
@@ -253,15 +304,27 @@ def _maybe_save_production_artifact(
     split: dict,
     base_features: list[str],
     spatial_features: list[str],
+    wind_advection_features: list[str],
     base_ensemble: IconD2MetarTmaxEnsemble,
     spatial_ensemble: IconD2MetarTmaxEnsemble | None,
+    wind_advection_ensemble: IconD2MetarTmaxEnsemble | None,
     base_weight: float,
     spatial_weight: float | None,
+    wind_advection_weight: float | None,
     neighbor_stations: list[str],
+    advection_stations: list[str],
 ) -> dict:
     if not args.save_production_model:
         return {}
-    if args.production_variant == "spatial":
+    if args.production_variant == "spatial_wind_advection":
+        if wind_advection_ensemble is None:
+            raise ValueError("--production-variant spatial_wind_advection requires --include-wind-advection with available advection data")
+        version = WIND_ADVECTION_MODEL_VERSION
+        ensemble = wind_advection_ensemble
+        feature_columns = wind_advection_features
+        ml_weight = wind_advection_weight
+        variant_name = "eddm_metar_icon_d2_spatial_wind_advection"
+    elif args.production_variant == "spatial":
         if spatial_ensemble is None:
             raise ValueError("--production-variant spatial requires --include-spatial with available neighbor data")
         version = SPATIAL_MODEL_VERSION
@@ -292,15 +355,23 @@ def _maybe_save_production_artifact(
         "role": "production_champion" if args.promote_production else "production_candidate",
         "training_source": "IEM METAR historical observations + Open-Meteo forecast-as-issued ICON-D2 single runs",
         "feature_set_version": (
-            "eddm.metar_tmax.icon_d2.spatial_metar.v1"
+            "eddm.metar_tmax.icon_d2.spatial_wind_advection.v1"
+            if args.production_variant == "spatial_wind_advection"
+            else "eddm.metar_tmax.icon_d2.spatial_metar.v1"
             if args.production_variant == "spatial"
             else "eddm.metar_tmax.icon_d2.intraday_enhanced.v1"
         ),
         "feature_columns": feature_columns,
         "enhanced_intraday_feature_columns": ENHANCED_INTRADAY_FEATURES,
         "nwp_feature_columns": NWP_COLUMNS,
-        "spatial_feature_columns": spatial_feature_columns(neighbor_stations) if args.production_variant == "spatial" else [],
-        "neighbor_stations": neighbor_stations if args.production_variant == "spatial" else [],
+        "spatial_feature_columns": spatial_feature_columns(neighbor_stations) if args.production_variant in {"spatial", "spatial_wind_advection"} else [],
+        "wind_advection_feature_columns": (
+            wind_advection_feature_columns(advection_stations, target_station=AIRPORT)
+            if args.production_variant == "spatial_wind_advection"
+            else []
+        ),
+        "neighbor_stations": neighbor_stations if args.production_variant in {"spatial", "spatial_wind_advection"} else [],
+        "advection_stations": advection_stations if args.production_variant == "spatial_wind_advection" else [],
         "usable_rows": len(frame),
         "days_joined": int(frame["target_date_local"].nunique()),
         "target_period": [str(frame["target_date_local"].min()), str(frame["target_date_local"].max())],
@@ -319,6 +390,7 @@ def _maybe_save_production_artifact(
                 "target_start": str(frame["target_date_local"].min()),
                 "target_end": str(frame["target_date_local"].max()),
                 "variant": args.production_variant,
+                "advection_available_sum": float(frame.get("adv_available_station_count", pd.Series(dtype=float)).sum()),
             }
         ),
         "created_at_utc": datetime.now(UTC).isoformat(),
@@ -326,7 +398,7 @@ def _maybe_save_production_artifact(
         "limitations": [
             "Target is EDDM METAR Tmax, not DWD official Tmax.",
             "TAF is not used.",
-            "Backtest full-day MAE was weaker than the previous DWD-target production model; promoted by explicit manual decision.",
+            "Candidate promotion should be based on METAR-target live monitoring, not only offline replay.",
         ],
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
@@ -342,7 +414,7 @@ def _maybe_save_production_artifact(
     if args.promote_production:
         promote_model(
             model_version=version,
-            reason="manual_promote_eddm_metar_target_spatial",
+            reason=f"manual_promote_eddm_metar_target_{args.production_variant}",
             metrics=holdout_metrics,
             model_dir=model_dir,
         )
@@ -397,6 +469,20 @@ def _build_spatial_frame(joined: pd.DataFrame, neighbor_dir: str, neighbor_stati
         neighbor_metars,
         timezone_name=TIMEZONE,
         stations=neighbor_stations,
+    )
+
+
+def _build_wind_advection_frame(frame: pd.DataFrame, neighbor_dir: str, advection_stations: list[str]) -> pd.DataFrame:
+    station_metars = {
+        station: pd.read_parquet(Path(neighbor_dir) / f"metar_iem_{station}.parquet")
+        for station in advection_stations
+    }
+    return add_wind_advection_features_to_frame(
+        frame,
+        station_metars,
+        timezone_name=TIMEZONE,
+        stations=advection_stations,
+        target_station=AIRPORT,
     )
 
 
@@ -518,21 +604,28 @@ def _optimize_ml_weight(
     model: MetarTmaxUpsideModel,
     residuals: dict[int, np.ndarray],
 ) -> float:
+    calibration_ensemble = IconD2MetarTmaxEnsemble(model, residuals, 0.0, "calibration")
+    cached = [
+        (calibration_ensemble.residual_distribution(row), model.predict_distribution(row), float(row["final_metar_tmax_c"]))
+        for _, row in calibration.iterrows()
+    ]
     best_weight = 0.0
     best_nll = np.inf
     for weight in np.linspace(0.0, 1.0, 21):
-        ensemble = IconD2MetarTmaxEnsemble(model, residuals, float(weight), "calibration")
-        values = []
-        for _, row in calibration.iterrows():
-            try:
-                values.append(nll_integer_bin(ensemble.predict_distribution(row), float(row["final_metar_tmax_c"])))
-            except Exception:
-                values.append(27.631)
-        score = float(np.mean(values))
+        score = float(np.mean([_nll_mixed(residual_dist, ml_dist, actual, weight) for residual_dist, ml_dist, actual in cached]))
         if score < best_nll:
             best_nll = score
             best_weight = float(weight)
     return best_weight
+
+
+def _nll_mixed(left: TmaxDistribution, right: TmaxDistribution, actual: float, right_weight: float) -> float:
+    weight = float(np.clip(right_weight, 0.0, 1.0))
+    left_lookup = {int(bin_c): float(probability) for bin_c, probability in zip(left.bins_c, left.probabilities)}
+    right_lookup = {int(bin_c): float(probability) for bin_c, probability in zip(right.bins_c, right.probabilities)}
+    actual_bin = int(round(actual))
+    probability = (1.0 - weight) * left_lookup.get(actual_bin, 0.0) + weight * right_lookup.get(actual_bin, 0.0)
+    return float(-np.log(max(probability, 1e-12)))
 
 
 def _score_holdout(
@@ -541,6 +634,7 @@ def _score_holdout(
     current_production_model,
     base_ensemble: IconD2MetarTmaxEnsemble,
     spatial_ensemble: IconD2MetarTmaxEnsemble | None,
+    wind_advection_ensemble: IconD2MetarTmaxEnsemble | None,
 ) -> pd.DataFrame:
     rows = []
     for _, row in test.iterrows():
@@ -551,6 +645,8 @@ def _score_holdout(
         }
         if spatial_ensemble is not None:
             variants["eddm_metar_icon_d2_spatial"] = spatial_ensemble.predict_distribution(row)
+        if wind_advection_ensemble is not None:
+            variants["eddm_metar_icon_d2_spatial_wind_advection"] = wind_advection_ensemble.predict_distribution(row)
         for name, dist in variants.items():
             rows.append(_score_row(row, name, dist, actual))
     return pd.DataFrame(rows)
@@ -558,6 +654,8 @@ def _score_holdout(
 
 def _predict_current_production(model, row: pd.Series) -> TmaxDistribution:
     feature_row = row.to_dict()
+    if hasattr(model, "ml_model") and hasattr(model, "residuals_by_hour"):
+        return model.predict_distribution(feature_row)
     feature_row["month"] = pd.Timestamp(str(row["target_date_local"])).month
     feature_row["issue_hour_utc"] = pd.Timestamp(row["issue_time_utc"]).hour
     feature_row["nwp_missing"] = False
@@ -747,6 +845,7 @@ def _markdown(report: dict, summary: pd.DataFrame, by_hour: pd.DataFrame, by_hou
             f"- rows: `{report['usable_rows']}`",
             f"- days: `{report['days']}`",
             f"- spatial enabled: `{report['spatial_enabled']}`",
+            f"- wind/advection enabled: `{report['wind_advection_enabled']}`",
             f"- recommendation: `{report['recommendation']['decision']}`",
             "",
             "## Summary",
@@ -790,11 +889,14 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Backtest an EDDM METAR Tmax target model.")
     parser.add_argument("--metar-path", default="data/interim/metar_iem_EDDM.parquet")
     parser.add_argument("--nwp-archive", default="data/forecasts/open_meteo_single_runs_icon_d2.parquet")
-    parser.add_argument("--current-production-model", default="data/models/nwp_residual_icon_d2_20260531.joblib")
+    parser.add_argument("--current-production-model", default="data/models/eddm_metar_tmax_icon_d2_spatial_v1.joblib")
     parser.add_argument("--neighbor-dir", default="data/interim")
     parser.add_argument("--neighbor-station", nargs="*", default=EDDM_SPATIAL_STATIONS)
     parser.add_argument("--include-spatial", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--reuse-spatial-dataset", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--advection-station", nargs="*", default=EDDM_ADVECTION_STATIONS)
+    parser.add_argument("--include-wind-advection", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--reuse-wind-advection-dataset", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--local-issue-hours", nargs="*", type=int, default=[6, 8, 10, 12, 14, 16, 18, 20])
     parser.add_argument("--min-train-rows", type=int, default=500)
     parser.add_argument("--min-calibration-rows", type=int, default=120)
@@ -802,11 +904,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-iter", type=int, default=70)
     parser.add_argument("--save-production-model", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--promote-production", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--production-variant", choices=["base", "spatial"], default="spatial")
+    parser.add_argument("--production-variant", choices=["base", "spatial", "spatial_wind_advection"], default="spatial_wind_advection")
     parser.add_argument("--model-dir", default="data/models")
     parser.add_argument("--target-output", default="data/processed/metar_tmax_target_EDDM.parquet")
     parser.add_argument("--dataset-output", default="data/processed/metar_upside_dataset_EDDM_icon_d2.parquet")
     parser.add_argument("--spatial-dataset-output", default="data/processed/metar_upside_dataset_EDDM_icon_d2_spatial.parquet")
+    parser.add_argument("--wind-advection-dataset-output", default="data/processed/metar_upside_dataset_EDDM_icon_d2_spatial_wind_advection.parquet")
     parser.add_argument("--report-dir", default="data/reports")
     parser.add_argument("--doc-path", default="docs/eddm_metar_tmax_backtest.md")
     return parser.parse_args()

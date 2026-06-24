@@ -9,11 +9,17 @@ from weather_tmax_bot.utils.time import local_day_bounds_utc
 
 
 DEFAULT_ADVECTION_STATIONS = ["LFPB", "LFPG", "LFPO"]
+EDDM_ADVECTION_STATIONS = ["EDDM", "EDMO", "EDMA", "ETSI", "ETSL"]
 
 
-def wind_advection_feature_columns(stations: list[str] | tuple[str, ...] = DEFAULT_ADVECTION_STATIONS) -> list[str]:
+def wind_advection_feature_columns(
+    stations: list[str] | tuple[str, ...] = DEFAULT_ADVECTION_STATIONS,
+    *,
+    target_station: str = "LFPB",
+) -> list[str]:
     columns: list[str] = []
-    for station in stations:
+    station_codes = [station.upper() for station in stations]
+    for station in station_codes:
         prefix = f"adv_{station.lower()}"
         columns.extend(
             [
@@ -59,14 +65,60 @@ def wind_advection_feature_columns(stations: list[str] | tuple[str, ...] = DEFAU
             "adv_any_warm_advection_signal",
             "adv_any_frontal_passage_signal",
             "adv_all_available_cold_advection_signal",
-            "adv_lfpg_minus_lfpb_temp_trend_1h",
-            "adv_lfpo_minus_lfpb_temp_trend_1h",
-            "adv_neighbor_mean_minus_lfpb_temp_trend_1h",
-            "adv_neighbor_mean_minus_lfpb_dewpoint_trend_3h",
-            "adv_neighbor_mean_minus_lfpb_pressure_tendency_3h",
+            *_target_relative_feature_columns(stations, target_station=target_station),
         ]
     )
     return columns
+
+
+def _target_relative_feature_columns(
+    stations: list[str] | tuple[str, ...],
+    *,
+    target_station: str,
+) -> list[str]:
+    target = target_station.lower()
+    columns = [
+        f"adv_neighbor_mean_minus_{target}_temp_trend_1h",
+        f"adv_neighbor_mean_minus_{target}_dewpoint_trend_3h",
+        f"adv_neighbor_mean_minus_{target}_pressure_tendency_3h",
+    ]
+    for station in stations:
+        station_upper = station.upper()
+        if station_upper == target_station.upper():
+            continue
+        columns.append(f"adv_{station.lower()}_minus_{target}_temp_trend_1h")
+    return columns
+
+
+def _target_relative_features(
+    station_summaries: dict[str, dict],
+    neighbor_summaries: list[dict],
+    target_summary: dict,
+    stations: list[str] | tuple[str, ...],
+    *,
+    target_station: str,
+) -> dict:
+    target = target_station.lower()
+    features = {
+        f"adv_neighbor_mean_minus_{target}_temp_trend_1h": _maybe_diff(
+            _mean_or_nan([s.get("temp_trend_1h") for s in neighbor_summaries]), target_summary.get("temp_trend_1h")
+        ),
+        f"adv_neighbor_mean_minus_{target}_dewpoint_trend_3h": _maybe_diff(
+            _mean_or_nan([s.get("dewpoint_trend_3h") for s in neighbor_summaries]), target_summary.get("dewpoint_trend_3h")
+        ),
+        f"adv_neighbor_mean_minus_{target}_pressure_tendency_3h": _maybe_diff(
+            _mean_or_nan([s.get("pressure_tendency_3h") for s in neighbor_summaries]), target_summary.get("pressure_tendency_3h")
+        ),
+    }
+    for station in stations:
+        station_upper = station.upper()
+        if station_upper == target_station.upper():
+            continue
+        features[f"adv_{station.lower()}_minus_{target}_temp_trend_1h"] = _maybe_diff(
+            station_summaries.get(station_upper, {}).get("temp_trend_1h"),
+            target_summary.get("temp_trend_1h"),
+        )
+    return features
 
 
 def build_wind_advection_features(
@@ -76,13 +128,15 @@ def build_wind_advection_features(
     issue_time_utc,
     timezone_name: str,
     stations: list[str] | tuple[str, ...] = DEFAULT_ADVECTION_STATIONS,
+    target_station: str = "LFPB",
 ) -> dict:
     issue = pd.Timestamp(issue_time_utc).tz_convert("UTC")
     features: dict[str, float | int | bool | str] = {}
     station_summaries: dict[str, dict] = {}
     max_knowledge_time: pd.Timestamp | None = None
 
-    for station in stations:
+    station_codes = [station.upper() for station in stations]
+    for station in station_codes:
         prefix = f"adv_{station.lower()}"
         station_features, summary, station_knowledge = _station_advection_features(
             _prepare_metar(station_metars.get(station, pd.DataFrame())),
@@ -97,8 +151,9 @@ def build_wind_advection_features(
             max_knowledge_time = station_knowledge if max_knowledge_time is None else max(max_knowledge_time, station_knowledge)
 
     available = [summary for summary in station_summaries.values() if summary.get("available")]
-    neighbor_summaries = [station_summaries.get(station, {}) for station in stations if station != "LFPB"]
-    lfpb = station_summaries.get("LFPB", {})
+    target_station = target_station.upper()
+    neighbor_summaries = [station_summaries.get(station, {}) for station in station_codes if station != target_station]
+    target_summary = station_summaries.get(target_station, {})
 
     features.update(
         {
@@ -116,17 +171,7 @@ def build_wind_advection_features(
             "adv_any_warm_advection_signal": any(bool(s.get("warm_advection_signal")) for s in available),
             "adv_any_frontal_passage_signal": any(bool(s.get("frontal_passage_signal")) for s in available),
             "adv_all_available_cold_advection_signal": bool(available) and all(bool(s.get("cold_advection_signal")) for s in available),
-            "adv_lfpg_minus_lfpb_temp_trend_1h": _maybe_diff(station_summaries.get("LFPG", {}).get("temp_trend_1h"), lfpb.get("temp_trend_1h")),
-            "adv_lfpo_minus_lfpb_temp_trend_1h": _maybe_diff(station_summaries.get("LFPO", {}).get("temp_trend_1h"), lfpb.get("temp_trend_1h")),
-            "adv_neighbor_mean_minus_lfpb_temp_trend_1h": _maybe_diff(
-                _mean_or_nan([s.get("temp_trend_1h") for s in neighbor_summaries]), lfpb.get("temp_trend_1h")
-            ),
-            "adv_neighbor_mean_minus_lfpb_dewpoint_trend_3h": _maybe_diff(
-                _mean_or_nan([s.get("dewpoint_trend_3h") for s in neighbor_summaries]), lfpb.get("dewpoint_trend_3h")
-            ),
-            "adv_neighbor_mean_minus_lfpb_pressure_tendency_3h": _maybe_diff(
-                _mean_or_nan([s.get("pressure_tendency_3h") for s in neighbor_summaries]), lfpb.get("pressure_tendency_3h")
-            ),
+            **_target_relative_features(station_summaries, neighbor_summaries, target_summary, station_codes, target_station=target_station),
             "adv_max_feature_knowledge_time_utc": (max_knowledge_time or issue).isoformat(),
             "adv_leakage_check_passed": bool((max_knowledge_time or issue) <= issue),
         }
@@ -140,19 +185,22 @@ def add_wind_advection_features_to_frame(
     *,
     timezone_name: str,
     stations: list[str] | tuple[str, ...] = DEFAULT_ADVECTION_STATIONS,
+    target_station: str = "LFPB",
 ) -> pd.DataFrame:
     out = frame.copy()
-    station_day_metars = _station_day_metar_map(station_metars, timezone_name=timezone_name, stations=stations)
+    station_codes = [station.upper() for station in stations]
+    station_day_metars = _station_day_metar_map(station_metars, timezone_name=timezone_name, stations=station_codes)
     rows = [
         build_wind_advection_features(
             {
                 station: station_day_metars.get(station, {}).get(str(row["target_date_local"]), pd.DataFrame())
-                for station in stations
+                for station in station_codes
             },
             target_date_local=pd.Timestamp(str(row["target_date_local"])).date(),
             issue_time_utc=row["issue_time_utc"],
             timezone_name=timezone_name,
-            stations=stations,
+            stations=station_codes,
+            target_station=target_station,
         )
         for _, row in out.iterrows()
     ]
