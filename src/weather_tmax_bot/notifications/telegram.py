@@ -83,11 +83,13 @@ def format_operational_cycle_message(summary: dict) -> str:
         f"Дата: <b>{escape(str(summary.get('target_date_local', 'не указана')))}</b>",
         f"Выпуск: {_format_local_time(summary.get('issue_time_utc'))}",
         status_note,
+        *_format_latest_metar_record(summary.get("latest_metar_record") or forecast.get("latest_metar_record") or {}),
         "",
         *_format_temperature_summary(forecast),
         "",
         *_format_probability_bins(forecast.get("probabilities_by_integer_c", {})),
         *_format_thresholds(forecast.get("threshold_probabilities", {})),
+        *_format_unimodal_shadow_candidate(forecast.get("forecast_components", {}), forecast.get("forecast_variants", {})),
         *_format_spatial_wind_advection_candidate(forecast.get("forecast_components", {})),
         *_format_intraday_summary(forecast.get("forecast_components", {})),
         *_format_growth_potential_summary(forecast.get("forecast_components", {})),
@@ -183,7 +185,32 @@ def _format_expected(component: dict) -> str:
     return "недоступен" if value is None else f"{float(value):.1f} °C"
 
 
-def _format_spatial_wind_advection_candidate(components: dict) -> list[str]:
+def _format_unimodal_shadow_candidate(components: dict, variants: dict | None = None, metar_change: dict | None = None) -> list[str]:
+    candidate = (components or {}).get("unimodal_shadow_candidate") or {}
+    variant = (variants or {}).get("shadow_unimodal_pmf") or {}
+    forecast = candidate.get("forecast") or variant.get("distribution") or {}
+    probabilities = forecast.get("probabilities_by_integer_c") or {}
+    if not probabilities:
+        return []
+    metadata = candidate.get("metadata") or variant.get("metadata") or {}
+    comparison = candidate.get("comparison_to_champion") or {}
+    thresholds = forecast.get("threshold_probabilities") or {}
+    lines = [
+        "",
+        "<b>EDDM unimodal PMF shadow</b>",
+        "Diagnostic only: does not affect the operational forecast.",
+        f"Expected METAR Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} C</b> ({_signed_c(comparison.get('expected_tmax_delta_c'))} vs production)",
+        f"Most likely bin: <b>{int(forecast.get('most_likely_integer_c', 0))} C</b>",
+        f"Top bins: {_format_compact_bins(probabilities, limit=6)}",
+        f"P(Tmax >= 25 C): {float(thresholds.get('ge_25', 0.0)):.1%}",
+        f"P(Tmax >= 30 C): {float(thresholds.get('ge_30', 0.0)):.1%}",
+        f"Shape violations: {metadata.get('shadow_unimodal_violation_count', 'n/a')}",
+    ]
+    lines.extend(_format_model_metar_change(metar_change))
+    return lines
+
+
+def _format_spatial_wind_advection_candidate(components: dict, metar_change: dict | None = None) -> list[str]:
     candidate = (components or {}).get("spatial_wind_advection_candidate") or {}
     if not candidate or not candidate.get("enabled", False):
         return []
@@ -191,17 +218,19 @@ def _format_spatial_wind_advection_candidate(components: dict) -> list[str]:
         reason = str(candidate.get("reason") or "")
         if reason == "outside_spatial_wind_advection_local_hour_window":
             return []
-        return [
+        lines = [
             "",
             "<b>EDDM spatial + wind/advection shadow</b>",
             "Diagnostic only: does not affect the operational forecast.",
             f"Status: inactive ({escape(reason or 'unknown reason')})",
         ]
+        lines.extend(_format_model_metar_change(metar_change))
+        return lines
     forecast = candidate.get("forecast") or {}
     thresholds = forecast.get("threshold_probabilities") or {}
     comparison = candidate.get("comparison_to_champion") or {}
     wind = candidate.get("wind_advection_features") or {}
-    return [
+    lines = [
         "",
         "<b>EDDM spatial + wind/advection shadow</b>",
         "Diagnostic only: does not affect the operational forecast. Active 12:00-18:00 local.",
@@ -214,6 +243,8 @@ def _format_spatial_wind_advection_candidate(components: dict) -> list[str]:
         f"Mean temp trend 1h: {_fmt_optional_float(wind.get('mean_temp_trend_1h'))} C",
         f"Front signal: {_yes_no(wind.get('any_frontal_passage_signal'))}",
     ]
+    lines.extend(_format_model_metar_change(metar_change))
+    return lines
 
 
 def _format_shadow_summary(components: dict) -> list[str]:
@@ -471,6 +502,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
     previous = comparison.get("previous") or {}
     current = comparison.get("current") or {}
     deltas = comparison.get("deltas") or {}
+    variant_changes = comparison.get("variants") or {}
     thresholds = payload.get("threshold_probabilities", {}) or {}
     lines = [
         f"<b>METAR-обновление прогноза: {escape(str(payload.get('airport', 'EDDM')))}</b>",
@@ -512,9 +544,16 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
         ]
     )
     lines.extend(["", *_format_latest_metar_record(latest_metar)])
-    lines.extend(["", *_format_distribution_change(payload, previous)])
+    lines.extend(["", *_format_probability_bins(payload.get("probabilities_by_integer_c") or {})])
     lines.extend(_format_source_compatibility(payload.get("source_compatibility", {})))
-    lines.extend(_format_spatial_wind_advection_candidate(forecast_components))
+    lines.extend(
+        _format_unimodal_shadow_candidate(
+            forecast_components,
+            payload.get("forecast_variants", {}),
+            variant_changes.get("shadow_unimodal_pmf"),
+        )
+    )
+    lines.extend(_format_spatial_wind_advection_candidate(forecast_components, variant_changes.get("shadow_spatial_wind_advection")))
     lines.extend(_format_growth_potential_summary(forecast_components))
     shadow_final = {}
     shadow_intraday = shadow.get("intraday_update") or {}
@@ -584,6 +623,28 @@ def _format_shadow_interpretation(intraday: dict) -> list[str]:
 
 def _signed_pp(value: Any) -> str:
     return "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445" if value is None else f"{float(value) * 100:+.1f} \u043f.\u043f."
+
+
+def _format_model_metar_change(change: dict | None) -> list[str]:
+    if not change:
+        return []
+    if not change.get("has_previous"):
+        return ["", "<b>Изменение с прошлого METAR</b>", "Предыдущего прогноза для этой модели пока нет."]
+    current = change.get("current") or {}
+    previous = change.get("previous") or {}
+    deltas = change.get("deltas") or {}
+    current_bin = current.get("most_likely_integer_c")
+    previous_bin = previous.get("most_likely_integer_c")
+    if current_bin is None or previous_bin is None:
+        bin_change = "нет данных"
+    else:
+        bin_change = f"{int(previous_bin):+d} °C -> {int(current_bin):+d} °C"
+    return [
+        "",
+        "<b>Изменение с прошлого METAR</b>",
+        f"Expected Tmax: {_signed_c(deltas.get('expected_tmax_delta_c'))}",
+        f"Главная корзина: {bin_change}",
+    ]
 
 
 def _format_latest_metar_record(record: dict) -> list[str]:

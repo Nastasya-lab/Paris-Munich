@@ -175,7 +175,43 @@ def test_operational_cycle_message_includes_spatial_wind_advection_shadow():
     assert "P(Tmax >= 30 C): 30.0%" in text
 
 
-def test_metar_event_message_includes_integer_bin_probability_changes():
+def test_operational_cycle_message_includes_unimodal_shadow():
+    text = telegram.format_operational_cycle_message(
+        {
+            "accepted": True,
+            "airport": "EDDM",
+            "forecast": {
+                "expected_tmax_c": 29.1,
+                "median_tmax_c": 29.0,
+                "most_likely_integer_c": 29,
+                "intervals": {"80": [28.0, 31.0]},
+                "probabilities_by_integer_c": {"28": 0.2, "29": 0.5, "30": 0.3},
+                "threshold_probabilities": {"ge_20": 1.0, "ge_25": 1.0, "ge_30": 0.3, "le_0": 0.0},
+                "forecast_components": {
+                    "unimodal_shadow_candidate": {
+                        "forecast": {
+                            "expected_tmax_c": 29.2,
+                            "most_likely_integer_c": 29,
+                            "probabilities_by_integer_c": {"28": 0.2, "29": 0.5, "30": 0.3},
+                            "threshold_probabilities": {"ge_25": 1.0, "ge_30": 0.3},
+                        },
+                        "comparison_to_champion": {"expected_tmax_delta_c": 0.1},
+                        "metadata": {"shadow_unimodal_violation_count": 0},
+                    }
+                },
+            },
+            "forecast_quality": {"status": "ok", "reasons": []},
+            "forecast_acceptance": {"cautions": []},
+        }
+    )
+
+    assert "EDDM unimodal PMF shadow" in text
+    assert "Diagnostic only" in text
+    assert "Expected METAR Tmax: <b>29.2 C</b>" in text
+    assert "Shape violations: 0" in text
+
+
+def test_metar_event_message_includes_current_integer_bin_probabilities_without_bin_deltas():
     text = telegram.format_metar_event_message(
         {
             "airport": "EDDM",
@@ -203,13 +239,13 @@ def test_metar_event_message_includes_integer_bin_probability_changes():
 
     assert "+21" in text
     assert "20.0%" in text
-    assert "-10.0" in text
     assert "+22" in text
     assert "50.0%" in text
-    assert "+10.0" in text
+    assert "+10.0 п.п." not in text
+    assert "-10.0 п.п." not in text
 
 
-def test_metar_event_message_says_when_distribution_is_unchanged():
+def test_metar_event_message_shows_current_distribution_without_unchanged_notice():
     text = telegram.format_metar_event_message(
         {
             "airport": "EDDM",
@@ -230,7 +266,7 @@ def test_metar_event_message_says_when_distribution_is_unchanged():
 
     assert "+22" in text
     assert "100.0%" in text
-    assert "+0.0" in text
+    assert "+0.0 п.п." not in text
 
 
 def test_metar_event_message_hides_challenger_and_keeps_growth_potential():
@@ -256,6 +292,51 @@ def test_metar_event_message_hides_challenger_and_keeps_growth_potential():
     assert "ML shadow: remaining upside" not in text
     assert "Shadow-" not in text
     assert "blended shadow" not in text
+
+
+def test_metar_event_message_includes_unimodal_model_change():
+    text = telegram.format_metar_event_message(
+        {
+            "airport": "EDDM",
+            "target_date_local": "2026-06-01",
+            "issue_time_utc": "2026-06-01T10:55:00Z",
+            "expected_tmax_c": 22.4,
+            "most_likely_integer_c": 22,
+            "threshold_probabilities": {},
+            "probabilities_by_integer_c": {"22": 1.0},
+            "forecast_components": {
+                "intraday_update": {},
+                "unimodal_shadow_candidate": {
+                    "forecast": {
+                        "expected_tmax_c": 22.8,
+                        "most_likely_integer_c": 23,
+                        "probabilities_by_integer_c": {"22": 0.3, "23": 0.7},
+                        "threshold_probabilities": {"ge_25": 0.0, "ge_30": 0.0},
+                    },
+                    "comparison_to_champion": {"expected_tmax_delta_c": 0.4},
+                    "metadata": {"shadow_unimodal_violation_count": 0},
+                },
+            },
+        },
+        {
+            "previous": {"most_likely_integer_c": 22, "probabilities_by_integer_c": {"22": 1.0}},
+            "current": {"most_likely_integer_c": 22},
+            "deltas": {},
+            "variants": {
+                "shadow_unimodal_pmf": {
+                    "has_previous": True,
+                    "current": {"expected_tmax_c": 22.8, "most_likely_integer_c": 23},
+                    "previous": {"expected_tmax_c": 22.1, "most_likely_integer_c": 22},
+                    "deltas": {"expected_tmax_delta_c": 0.7},
+                }
+            },
+        },
+    )
+
+    assert "EDDM unimodal PMF shadow" in text
+    assert "Изменение с прошлого METAR" in text
+    assert "Expected Tmax: +0.7" in text
+    assert "+22 °C -> +23 °C" in text
 
 
 def test_metar_event_message_includes_source_compatibility_audit():

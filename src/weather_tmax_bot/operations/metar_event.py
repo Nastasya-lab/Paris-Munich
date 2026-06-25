@@ -126,13 +126,16 @@ def run_metar_event_cycle(
 
 def compare_forecast_to_previous(current: dict, previous_record: dict | None) -> dict:
     current_summary = _forecast_summary_from_payload(current)
+    current_variants = _variant_summaries_from_payload(current)
     previous_summary = _forecast_summary_from_record(previous_record) if previous_record else None
+    previous_variants = _variant_summaries_from_record(previous_record)
     if not previous_summary:
         return {
             "has_previous": False,
             "current": current_summary,
             "previous": None,
             "deltas": {},
+            "variants": _compare_variant_summaries(current_variants, {}),
         }
     deltas = {
         "expected_tmax_delta_c": current_summary["expected_tmax_c"] - previous_summary["expected_tmax_c"],
@@ -149,6 +152,7 @@ def compare_forecast_to_previous(current: dict, previous_record: dict | None) ->
         "current": current_summary,
         "previous": previous_summary,
         "deltas": deltas,
+        "variants": _compare_variant_summaries(current_variants, previous_variants),
     }
 
 
@@ -267,35 +271,132 @@ def _latest_forecast_record(path: Path, *, airport: str, target_date_local: date
 
 def _forecast_summary_from_payload(payload: dict) -> dict:
     distribution = _distribution_from_mapping(payload.get("probabilities_by_integer_c") or {})
-    return {
-        "forecast_id": payload.get("forecast_id"),
-        "issue_time_utc": payload.get("issue_time_utc"),
-        "expected_tmax_c": float(payload.get("expected_tmax_c", 0.0)),
-        "median_tmax_c": float(payload.get("median_tmax_c", 0.0)),
-        "most_likely_integer_c": int(payload.get("most_likely_integer_c", 0)),
-        "threshold_probabilities": payload.get("threshold_probabilities", {}),
-        "probabilities_by_integer_c": {str(k): v for k, v in distribution.items()},
-    }
+    return _forecast_summary_from_distribution(
+        forecast_id=payload.get("forecast_id"),
+        issue_time_utc=payload.get("issue_time_utc"),
+        distribution=distribution,
+        expected_tmax_c=payload.get("expected_tmax_c"),
+        median_tmax_c=payload.get("median_tmax_c"),
+        most_likely_integer_c=payload.get("most_likely_integer_c"),
+        threshold_probabilities=payload.get("threshold_probabilities", {}),
+    )
 
 
 def _forecast_summary_from_record(record: dict | None) -> dict | None:
     if not record:
         return None
     distribution = _distribution_from_mapping(record.get("probability_distribution") or {})
-    return {
-        "forecast_id": record.get("forecast_id"),
-        "issue_time_utc": record.get("issue_time_utc"),
-        "expected_tmax_c": float(record.get("expected_tmax_c", 0.0)),
-        "median_tmax_c": float(record.get("median_tmax_c", 0.0)),
-        "most_likely_integer_c": int(record.get("most_likely_integer_c", 0)),
-        "probabilities_by_integer_c": {str(k): v for k, v in distribution.items()},
-        "threshold_probabilities": {
-            "ge_20": _threshold_ge(distribution, 20),
-            "ge_25": _threshold_ge(distribution, 25),
-            "ge_30": _threshold_ge(distribution, 30),
-            "le_0": sum(prob for bin_c, prob in distribution.items() if bin_c <= 0),
-        },
+    return _forecast_summary_from_distribution(
+        forecast_id=record.get("forecast_id"),
+        issue_time_utc=record.get("issue_time_utc"),
+        distribution=distribution,
+        expected_tmax_c=record.get("expected_tmax_c"),
+        median_tmax_c=record.get("median_tmax_c"),
+        most_likely_integer_c=record.get("most_likely_integer_c"),
+    )
+
+
+def _forecast_summary_from_distribution(
+    *,
+    forecast_id: Any,
+    issue_time_utc: Any,
+    distribution: dict[int, float],
+    expected_tmax_c: Any = None,
+    median_tmax_c: Any = None,
+    most_likely_integer_c: Any = None,
+    threshold_probabilities: dict | None = None,
+) -> dict:
+    thresholds = threshold_probabilities or {
+        "ge_20": _threshold_ge(distribution, 20),
+        "ge_25": _threshold_ge(distribution, 25),
+        "ge_30": _threshold_ge(distribution, 30),
+        "le_0": sum(prob for bin_c, prob in distribution.items() if bin_c <= 0),
     }
+    if expected_tmax_c is None:
+        expected_tmax_c = sum(bin_c * probability for bin_c, probability in distribution.items())
+    if median_tmax_c is None:
+        median_tmax_c = _median_from_distribution(distribution)
+    if most_likely_integer_c is None:
+        most_likely_integer_c = _most_likely_from_distribution(distribution)
+    return {
+        "forecast_id": forecast_id,
+        "issue_time_utc": issue_time_utc,
+        "expected_tmax_c": float(expected_tmax_c or 0.0),
+        "median_tmax_c": float(median_tmax_c or 0.0),
+        "most_likely_integer_c": int(most_likely_integer_c or 0),
+        "probabilities_by_integer_c": {str(k): v for k, v in distribution.items()},
+        "threshold_probabilities": thresholds,
+    }
+
+
+def _variant_summaries_from_payload(payload: dict) -> dict[str, dict]:
+    return _variant_summaries(payload.get("forecast_variants") or {}, payload.get("forecast_id"), payload.get("issue_time_utc"))
+
+
+def _variant_summaries_from_record(record: dict | None) -> dict[str, dict]:
+    if not record:
+        return {}
+    metadata = record.get("raw_input_metadata", {}) or {}
+    return _variant_summaries(metadata.get("forecast_variants") or {}, record.get("forecast_id"), record.get("issue_time_utc"))
+
+
+def _variant_summaries(variants: dict, forecast_id: Any, issue_time_utc: Any) -> dict[str, dict]:
+    summaries = {}
+    for name, payload in (variants or {}).items():
+        distribution_payload = (payload or {}).get("distribution") or {}
+        distribution = _distribution_from_mapping(distribution_payload.get("probabilities_by_integer_c") or {})
+        if not distribution:
+            continue
+        summaries[str(name)] = _forecast_summary_from_distribution(
+            forecast_id=forecast_id,
+            issue_time_utc=issue_time_utc,
+            distribution=distribution,
+            expected_tmax_c=distribution_payload.get("expected_tmax_c"),
+            median_tmax_c=distribution_payload.get("median_tmax_c"),
+            most_likely_integer_c=distribution_payload.get("most_likely_integer_c"),
+            threshold_probabilities=distribution_payload.get("threshold_probabilities"),
+        )
+    return summaries
+
+
+def _compare_variant_summaries(current: dict[str, dict], previous: dict[str, dict]) -> dict[str, dict]:
+    comparisons = {}
+    for name, current_summary in current.items():
+        previous_summary = previous.get(name)
+        comparisons[name] = {
+            "has_previous": previous_summary is not None,
+            "current": current_summary,
+            "previous": previous_summary,
+            "deltas": _summary_deltas(current_summary, previous_summary) if previous_summary else {},
+        }
+    return comparisons
+
+
+def _summary_deltas(current: dict, previous: dict) -> dict:
+    deltas = {
+        "expected_tmax_delta_c": current["expected_tmax_c"] - previous["expected_tmax_c"],
+        "median_tmax_delta_c": current["median_tmax_c"] - previous["median_tmax_c"],
+        "most_likely_integer_changed": current["most_likely_integer_c"] != previous["most_likely_integer_c"],
+        "most_likely_integer_delta_c": current["most_likely_integer_c"] - previous["most_likely_integer_c"],
+    }
+    for key in ("ge_20", "ge_25", "ge_30", "le_0"):
+        deltas[f"{key}_delta"] = current["threshold_probabilities"].get(key, 0.0) - previous["threshold_probabilities"].get(key, 0.0)
+    return deltas
+
+
+def _median_from_distribution(distribution: dict[int, float]) -> float:
+    cumulative = 0.0
+    for bin_c, probability in sorted(distribution.items()):
+        cumulative += probability
+        if cumulative >= 0.5:
+            return float(bin_c)
+    return float(_most_likely_from_distribution(distribution))
+
+
+def _most_likely_from_distribution(distribution: dict[int, float]) -> int:
+    if not distribution:
+        return 0
+    return max(distribution.items(), key=lambda item: item[1])[0]
 
 
 def _distribution_from_mapping(values: dict) -> dict[int, float]:

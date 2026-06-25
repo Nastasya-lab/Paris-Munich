@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import date
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from weather_tmax_bot.models.distribution import (
 )
 from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
+from weather_tmax_bot.operations.metar_event import compare_forecast_to_previous
 from weather_tmax_bot.operations.refresh import refresh_awc_live
 from weather_tmax_bot.utils.time import parse_issue_time, to_local_date
 
@@ -141,8 +143,14 @@ def main() -> None:
         production_model_version=production_model_version,
         feature_row=feature_row,
         unimodal_shadow_candidate=unimodal_shadow_candidate,
+        spatial_candidate=spatial_candidate,
     )
     nwp_source_diagnostics = _build_nwp_source_diagnostics(feature_row)
+    previous_record = _latest_forecast_record(
+        Path(os.getenv("WEATHER_TMAX_FORECAST_LOG_PATH", "data/logs/forecast_log.jsonl")),
+        airport=args.airport,
+        target_date_local=target_date,
+    )
     forecast_id = None
     if args.log:
         forecast_id = log_forecast(
@@ -222,6 +230,17 @@ def main() -> None:
         },
         "refresh_summary": refresh_summary,
     }
+    payload["comparison_to_previous"] = compare_forecast_to_previous(
+        {
+            **payload["forecast"],
+            "forecast_id": forecast_id,
+            "airport": args.airport,
+            "target_date_local": target_date.isoformat(),
+            "issue_time_utc": issue_time_utc.isoformat(),
+            "forecast_variants": forecast_variants,
+        },
+        previous_record,
+    )
     report_path = Path(args.report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
@@ -531,6 +550,22 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
+def _latest_forecast_record(path: Path, *, airport: str, target_date_local: date) -> dict | None:
+    if not path.exists():
+        return None
+    latest = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("airport") == airport and record.get("target_date_local") == target_date_local.isoformat():
+            latest = record
+    return latest
+
+
 def _distribution_from_payload(payload: dict | None) -> TmaxDistribution | None:
     probabilities = (payload or {}).get("probabilities_by_integer_c")
     if not probabilities:
@@ -546,9 +581,10 @@ def _build_forecast_variants(
     production_model_version: str,
     feature_row: dict,
     unimodal_shadow_candidate: dict,
+    spatial_candidate: dict | None = None,
 ) -> dict:
     local_issue_hour = _clean_optional_float(feature_row.get("local_issue_hour"))
-    return {
+    variants = {
         "production_champion": {
             "description": "Operational LFPB METAR Tmax distribution sent to users.",
             "distribution": distribution.to_payload(),
@@ -564,8 +600,18 @@ def _build_forecast_variants(
             "metadata": unimodal_shadow_candidate.get("metadata") or {},
         },
     }
-
-
+    candidate = spatial_candidate or {}
+    if candidate.get("active") and candidate.get("forecast"):
+        variants["shadow_spatial_wind_advection"] = {
+            "description": "LFPB spatial + wind/advection candidate distribution.",
+            "distribution": candidate.get("forecast") or {},
+            "metadata": {
+                "variant_version": candidate.get("model_version"),
+                "local_issue_hour": local_issue_hour,
+                "target": "METAR_Tmax",
+            },
+        }
+    return variants
 def _build_unimodal_shadow_candidate(
     distribution: TmaxDistribution,
     *,
@@ -662,6 +708,7 @@ def _format_message(payload: dict) -> str:
     forecast = payload["forecast"]
     signal = payload["metar_signal"]
     survival = payload.get("intraday_survival_layer") or {}
+    comparison = payload.get("comparison_to_previous") or {}
     thresholds = forecast["threshold_probabilities"]
     bins = {
         int(bin_c): float(probability)
@@ -678,12 +725,14 @@ def _format_message(payload: dict) -> str:
             f"Цель: максимум температуры, который покажут METAR за день",
             f"Выпуск UTC: <code>{payload['issue_time_utc']}</code>",
             f"ID прогноза: <code>{payload.get('forecast_id') or 'не логировался'}</code>",
+            *_format_lfpb_used_metar(signal),
             "",
             "<b>Температурный прогноз</b>",
             f"Ожидаемый METAR Tmax: <b>{forecast['expected_tmax_c']:.1f} °C</b>",
             f"Медиана: {forecast['median_tmax_c']:.1f} °C",
             f"Самая вероятная корзина: <b>{forecast['most_likely_integer_c']} °C</b>",
             f"Интервал 80%: {forecast['intervals']['80'][0]:.1f}...{forecast['intervals']['80'][1]:.1f} °C",
+            *_format_lfpb_model_change(comparison),
             "",
             "<b>Вероятности по градусам</b>",
             bin_text,
@@ -756,9 +805,10 @@ def _format_unimodal_shadow_lines(payload: dict) -> list[str]:
     interval_80 = (forecast.get("intervals") or {}).get("80") or [None, None]
     metadata = shadow.get("metadata") or {}
     comparison = (payload.get("unimodal_shadow_candidate") or {}).get("comparison_to_champion") or {}
+    metar_change = ((payload.get("comparison_to_previous") or {}).get("variants") or {}).get(UNIMODAL_SHADOW_VARIANT)
     delta = comparison.get("expected_tmax_delta_c")
     delta_text = "n/a" if delta is None or pd.isna(delta) else f"{float(delta):+.1f} C vs production"
-    return [
+    lines = [
         "<b>Shadow unimodal PMF</b>",
         "Diagnostic only: not used as the operational forecast.",
         f"Expected METAR Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} C</b> ({delta_text})",
@@ -768,6 +818,54 @@ def _format_unimodal_shadow_lines(payload: dict) -> list[str]:
         f"Shape violations: {metadata.get('shadow_unimodal_violation_count', 'n/a')}",
         bin_text,
     ]
+    lines.extend(_format_lfpb_model_change(metar_change))
+    return lines
+
+
+def _format_lfpb_model_change(change: dict | None) -> list[str]:
+    if not change:
+        return []
+    if not change.get("has_previous"):
+        return ["", "<b>Изменение с прошлого METAR</b>", "Предыдущего прогноза для этой модели пока нет."]
+    current = change.get("current") or {}
+    previous = change.get("previous") or {}
+    deltas = change.get("deltas") or {}
+    current_bin = current.get("most_likely_integer_c")
+    previous_bin = previous.get("most_likely_integer_c")
+    if current_bin is None or previous_bin is None:
+        bin_change = "нет данных"
+    else:
+        bin_change = f"{int(previous_bin):+d} °C -> {int(current_bin):+d} °C"
+    return [
+        "",
+        "<b>Изменение с прошлого METAR</b>",
+        f"Expected Tmax: {_fmt_delta(deltas.get('expected_tmax_delta_c'))}",
+        f"Главная корзина: {bin_change}",
+    ]
+
+
+def _format_lfpb_used_metar(signal: dict) -> list[str]:
+    raw_metar = signal.get("latest_metar_raw")
+    time_utc = signal.get("latest_metar_time_utc")
+    temperature = signal.get("latest_metar_temp_c")
+    if not raw_metar and not time_utc and temperature is None:
+        return []
+    lines = ["", "<b>Использованный METAR</b>"]
+    if time_utc:
+        lines.append(f"Время: {_format_lfpb_local_time(time_utc)}")
+    if temperature is not None and not pd.isna(temperature):
+        lines.append(f"Температура в сыром METAR: {float(temperature):.1f} °C")
+    if raw_metar:
+        lines.append(f"Сырая строка: <code>{raw_metar}</code>")
+    return lines
+
+
+def _format_lfpb_local_time(value) -> str:
+    parsed = pd.Timestamp(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.tz_localize("UTC")
+    local = parsed.tz_convert(TIMEZONE)
+    return local.strftime("%d.%m.%Y %H:%M по Парижу")
 
 
 def _fmt_float(value) -> str:
@@ -828,6 +926,7 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
         ]
     forecast = candidate.get("forecast") or {}
     thresholds = forecast.get("threshold_probabilities") or {}
+    metar_change = ((payload.get("comparison_to_previous") or {}).get("variants") or {}).get("shadow_spatial_wind_advection")
     spatial = candidate.get("spatial_features") or {}
     advection = candidate.get("wind_advection_features") or {}
     neighbors = candidate.get("neighbor_stations") or {}
@@ -862,7 +961,7 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
             f"Td3h {_fmt_signed_plain(info.get('dewpoint_trend_3h'))} °C, "
             f"QNH3h {_fmt_signed_plain(info.get('pressure_tendency_3h'))} hPa, {signal_text}"
         )
-    return [
+    lines = [
         "<b>Spatial + wind/advection candidate</b>",
         (
             "Использован как основной прогноз в этом выпуске. Активен только 12:00-18:00 по Парижу."
@@ -888,6 +987,8 @@ def _format_spatial_candidate_lines(payload: dict) -> list[str]:
         *(advection_lines or ["Wind/advection: нет данных"]),
         "",
     ]
+    lines.extend(_format_lfpb_model_change(metar_change))
+    return lines
 
 
 def _fmt_plain(value) -> str:

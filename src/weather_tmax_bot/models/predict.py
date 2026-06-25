@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import joblib
 import pandas as pd
@@ -14,6 +15,7 @@ from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT,
 from weather_tmax_bot.features.wind_advection import EDDM_ADVECTION_STATIONS, build_wind_advection_features
 from weather_tmax_bot.models.baselines import ClimatologyBaseline
 from weather_tmax_bot.models.disagreement import assess_model_disagreement
+from weather_tmax_bot.models.distribution import project_unimodal_distribution, unimodal_violation_count
 from weather_tmax_bot.models.extrapolation import detect_feature_extrapolation
 from weather_tmax_bot.models.intraday_update import apply_intraday_update
 from weather_tmax_bot.models.model_registry import load_model, resolve_active_artifacts
@@ -28,6 +30,8 @@ EDDM_WIND_ADVECTION_METADATA_PATH = Path("data/models/eddm_metar_tmax_icon_d2_sp
 EDDM_WIND_ADVECTION_VARIANT = "shadow_spatial_wind_advection"
 EDDM_WIND_ADVECTION_LOCAL_HOUR_START = 12
 EDDM_WIND_ADVECTION_LOCAL_HOUR_END = 18
+EDDM_UNIMODAL_VARIANT = "shadow_unimodal_pmf"
+EDDM_UNIMODAL_VERSION = "eddm_unimodal_projection_shadow_v1"
 
 
 def predict_with_climatology(
@@ -348,6 +352,11 @@ def _predict_metar_tmax_model(
             spatial_features.get("spatial_leakage_check_passed", False)
         )
     dist = model.predict_distribution(feature_row)
+    unimodal_candidate = _build_unimodal_shadow_candidate(
+        champion=dist,
+        active_model_version=active_model_version,
+        feature_row=feature_row,
+    )
     wind_advection_candidate = _predict_eddm_wind_advection_candidate(
         airport=airport,
         target_date=target_date,
@@ -376,6 +385,11 @@ def _predict_metar_tmax_model(
             },
         }
     }
+    feature_row["forecast_variants"][EDDM_UNIMODAL_VARIANT] = {
+        "description": "Shadow-only EDDM least-squares unimodal PMF projection; does not affect operational forecast.",
+        "distribution": unimodal_candidate["forecast"],
+        "metadata": unimodal_candidate["metadata"],
+    }
     if wind_advection_candidate.get("active") and wind_advection_candidate.get("forecast"):
         feature_row["forecast_variants"][EDDM_WIND_ADVECTION_VARIANT] = {
             "description": "Shadow-only EDDM spatial + wind/advection candidate; does not affect operational forecast.",
@@ -403,6 +417,7 @@ def _predict_metar_tmax_model(
             "spatial_available_station_count": feature_row.get("spatial_available_station_count"),
         },
         "spatial_wind_advection_candidate": wind_advection_candidate,
+        "unimodal_shadow_candidate": unimodal_candidate,
     }
     warnings = [
         *extrapolation.get("warnings", []),
@@ -429,6 +444,76 @@ def _add_metar_tmax_nwp_relative_features(nwp_features: dict, metar_features: di
     nwp_features["nwp_future_minus_current_max_c"] = (
         None if pd.isna(future) or pd.isna(current_max) else float(future) - float(current_max)
     )
+
+
+def _build_unimodal_shadow_candidate(*, champion, active_model_version: str, feature_row: dict) -> dict:
+    shadow = project_unimodal_distribution(champion)
+    forecast = shadow.to_payload()
+    champion_payload = champion.to_payload()
+    local_issue_hour = feature_row.get("local_issue_hour")
+    expected_delta = shadow.expected_tmax_c - champion.expected_tmax_c
+    ge_30_delta = (
+        forecast["threshold_probabilities"].get("ge_30", 0.0)
+        - champion_payload["threshold_probabilities"].get("ge_30", 0.0)
+    )
+    metadata = {
+        "variant_version": EDDM_UNIMODAL_VERSION,
+        "status": "shadow_only_does_not_affect_operational_forecast",
+        "local_issue_hour": local_issue_hour,
+        "forecast_phase": _forecast_phase(local_issue_hour),
+        "projection_method": "least_squares_unimodal_projection_by_candidate_mode",
+        "temperature": None,
+        "temperature_source": "disabled_for_eddm_after_backtest_quality_check",
+        "champion_model_version": active_model_version,
+        "champion_unimodal_violation_count": unimodal_violation_count(champion),
+        "shadow_unimodal_violation_count": unimodal_violation_count(shadow),
+        "expected_tmax_delta_c": expected_delta,
+    }
+    return {
+        "enabled": True,
+        "active": True,
+        "status": "shadow_only_does_not_affect_operational_forecast",
+        "variant": EDDM_UNIMODAL_VARIANT,
+        "model_version": EDDM_UNIMODAL_VERSION,
+        "champion_model_version": active_model_version,
+        "forecast": forecast,
+        "champion_shape": _shape_summary(champion),
+        "shadow_shape": _shape_summary(shadow),
+        "comparison_to_champion": {
+            "expected_tmax_delta_c": expected_delta,
+            "most_likely_integer_delta_c": shadow.most_likely_integer_c - champion.most_likely_integer_c,
+            "ge_30_probability_delta": ge_30_delta,
+        },
+        "metadata": metadata,
+    }
+
+
+def _shape_summary(distribution) -> dict:
+    probs = distribution.probabilities
+    deep_valleys = 0
+    if len(probs) >= 3:
+        for idx in range(1, len(probs) - 1):
+            left, center, right = probs[idx - 1], probs[idx], probs[idx + 1]
+            if min(left, right) >= 0.08 and center <= 0.60 * min(left, right):
+                deep_valleys += 1
+    return {
+        "unimodal_violation_count": unimodal_violation_count(distribution),
+        "deep_valley_count": int(deep_valleys),
+        "max_adjacent_probability_jump": float(abs(pd.Series(probs).diff()).max()) if len(probs) >= 2 else 0.0,
+    }
+
+
+def _forecast_phase(local_issue_hour) -> str:
+    if local_issue_hour is None or pd.isna(local_issue_hour):
+        return "unknown"
+    hour = float(local_issue_hour)
+    if hour < 10:
+        return "morning"
+    if hour < 14:
+        return "midday"
+    if hour < 18:
+        return "afternoon"
+    return "evening"
 
 
 def _predict_eddm_wind_advection_candidate(
@@ -523,8 +608,32 @@ def _annotate_metar_source(feature_row: dict, metar: pd.DataFrame) -> None:
     matches = frame[frame["observation_time_utc"] == latest_time]
     latest = matches.iloc[-1] if not matches.empty else frame.sort_values("observation_time_utc").iloc[-1]
     feature_row["latest_metar_source_id"] = latest.get("source_id")
+    feature_row["latest_metar_record"] = {
+        "observation_time_utc": _json_safe_value(latest.get("observation_time_utc")),
+        "knowledge_time_utc": _json_safe_value(latest.get("knowledge_time_utc")),
+        "ingest_time_utc": _json_safe_value(latest.get("ingest_time_utc")),
+        "temperature_c": _json_safe_value(latest.get("temperature_c")),
+        "dewpoint_c": _json_safe_value(latest.get("dewpoint_c")),
+        "raw_metar": _json_safe_value(latest.get("raw_metar")),
+        "source_id": _json_safe_value(latest.get("source_id")),
+    }
     feature_row["max_metar_knowledge_time_utc"] = feature_row.get("max_feature_knowledge_time_utc")
     feature_row["metar_missing"] = False
+
+
+def _json_safe_value(value: Any) -> Any:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        return value.isoformat()
+    if isinstance(value, (int, float, str, bool)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _max_timestamp_string(*values) -> str | None:
