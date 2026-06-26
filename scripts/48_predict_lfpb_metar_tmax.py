@@ -705,6 +705,7 @@ def _calibration_attached(model) -> bool:
 
 
 def _format_message(payload: dict) -> str:
+    return _format_lfpb_compact_message(payload)
     forecast = payload["forecast"]
     signal = payload["metar_signal"]
     survival = payload.get("intraday_survival_layer") or {}
@@ -820,6 +821,161 @@ def _format_unimodal_shadow_lines(payload: dict) -> list[str]:
     ]
     lines.extend(_format_lfpb_model_change(metar_change))
     return lines
+
+
+def _format_lfpb_compact_message(payload: dict) -> str:
+    forecast = payload["forecast"]
+    signal = payload.get("metar_signal") or {}
+    comparison = payload.get("comparison_to_previous") or {}
+    variants = payload.get("forecast_variants") or {}
+    variant_changes = comparison.get("variants") or {}
+    lines = [
+        "<b>LFPB Paris Tmax forecast</b>",
+        f"Дата прогноза: <b>{payload.get('target_date_local', 'не указана')}</b>",
+        f"Выпуск: {_format_lfpb_issue_time(payload.get('issue_time_utc'))}",
+        "",
+        *_format_lfpb_used_metar_compact(signal),
+        "",
+        *_format_lfpb_model_block(
+            "Рабочая модель",
+            str(payload.get("model_version") or "не указана"),
+            forecast,
+            comparison,
+        ),
+        "",
+        *_format_lfpb_unimodal_compact_block(payload, variants, variant_changes.get(UNIMODAL_SHADOW_VARIANT)),
+        "",
+        *_format_lfpb_wind_compact_block(payload, variant_changes.get("shadow_spatial_wind_advection")),
+        "",
+        *_format_lfpb_short_summary(payload),
+    ]
+    return "\n".join(line for line in lines if line is not None).strip()
+
+
+def _format_lfpb_model_block(title: str, model_version: str, forecast: dict, change: dict | None = None, extra_lines: list[str] | None = None) -> list[str]:
+    lines = [
+        f"<b>{title}</b>",
+        f"Модель: <code>{model_version}</code>",
+        f"Ожидаемый Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} °C</b>",
+        f"Самый вероятный Tmax: <b>{int(forecast.get('most_likely_integer_c', 0)):+d} °C</b>",
+        "Вероятности:",
+        *_format_lfpb_probability_lines(forecast.get("probabilities_by_integer_c") or {}),
+    ]
+    lines.extend(extra_lines or [])
+    lines.extend(_format_lfpb_model_change_clean(change))
+    return lines
+
+
+def _format_lfpb_unimodal_compact_block(payload: dict, variants: dict, change: dict | None) -> list[str]:
+    shadow = variants.get(UNIMODAL_SHADOW_VARIANT) or {}
+    forecast = shadow.get("distribution") or {}
+    if not forecast.get("probabilities_by_integer_c"):
+        return ["<b>Unimodal shadow</b>", "Статус: нет данных."]
+    metadata = shadow.get("metadata") or {}
+    model_version = metadata.get("variant_version") or "shadow_unimodal_pmf"
+    return _format_lfpb_model_block(
+        "Unimodal shadow",
+        str(model_version),
+        forecast,
+        change,
+        [f"Shape violations: {metadata.get('shadow_unimodal_violation_count', 'n/a')}"],
+    )
+
+
+def _format_lfpb_wind_compact_block(payload: dict, change: dict | None) -> list[str]:
+    candidate = payload.get("spatial_candidate") or {}
+    if not candidate.get("enabled", False):
+        return ["<b>Wind/advection shadow</b>", "Статус: нет данных."]
+    if not candidate.get("active", False) or not candidate.get("forecast"):
+        reason = str(candidate.get("reason") or "неактивна")
+        return [
+            "<b>Wind/advection shadow</b>",
+            f"Модель: <code>{candidate.get('model_version') or 'shadow_spatial_wind_advection'}</code>",
+            f"Статус: неактивна ({reason})",
+            *_format_lfpb_model_change_clean(change),
+        ]
+    forecast = candidate.get("forecast") or {}
+    model_version = candidate.get("model_version") or "shadow_spatial_wind_advection"
+    return _format_lfpb_model_block("Wind/advection shadow", str(model_version), forecast, change)
+
+
+def _format_lfpb_short_summary(payload: dict) -> list[str]:
+    forecast = payload.get("forecast") or {}
+    variants = payload.get("forecast_variants") or {}
+    unimodal = ((variants.get(UNIMODAL_SHADOW_VARIANT) or {}).get("distribution") or {})
+    wind = ((payload.get("spatial_candidate") or {}).get("forecast") or {})
+    signal = payload.get("metar_signal") or {}
+    lines = [
+        "<b>Кратко</b>",
+        f"Рабочий прогноз: {_format_lfpb_bin(forecast.get('most_likely_integer_c'))}",
+        f"Unimodal: {_format_lfpb_bin(unimodal.get('most_likely_integer_c'))}",
+        f"Wind/advection: {_format_lfpb_bin(wind.get('most_likely_integer_c'))}",
+    ]
+    if signal.get("latest_metar_temp_c") is not None:
+        lines.append(f"Последний METAR: {float(signal.get('latest_metar_temp_c')):.1f} °C")
+    return lines
+
+
+def _format_lfpb_used_metar_compact(signal: dict) -> list[str]:
+    raw_metar = signal.get("latest_metar_raw")
+    time_utc = signal.get("latest_metar_time_utc")
+    temperature = signal.get("latest_metar_temp_c")
+    if not raw_metar and not time_utc and temperature is None:
+        return ["<b>Использованный METAR</b>", "Нет данных."]
+    lines = ["<b>Использованный METAR</b>"]
+    if time_utc:
+        lines.append(f"Время: {_format_lfpb_local_time_clean(time_utc)}")
+    if temperature is not None and not pd.isna(temperature):
+        lines.append(f"Температура в сыром METAR: {float(temperature):.1f} °C")
+    if raw_metar:
+        lines.append(f"Сырая строка: <code>{raw_metar}</code>")
+    return lines
+
+
+def _format_lfpb_model_change_clean(change: dict | None) -> list[str]:
+    if not change:
+        return []
+    if not change.get("has_previous"):
+        return ["", "<b>Изменение с прошлого METAR</b>", "Предыдущего прогноза для этой модели пока нет."]
+    current = change.get("current") or {}
+    previous = change.get("previous") or {}
+    deltas = change.get("deltas") or {}
+    current_bin = current.get("most_likely_integer_c")
+    previous_bin = previous.get("most_likely_integer_c")
+    bin_change = "нет данных" if current_bin is None or previous_bin is None else f"{int(previous_bin):+d} °C -> {int(current_bin):+d} °C"
+    return [
+        "",
+        "<b>Изменение с прошлого METAR</b>",
+        f"Expected Tmax: {_fmt_delta(deltas.get('expected_tmax_delta_c'))}",
+        f"Главная корзина: {bin_change}",
+    ]
+
+
+def _format_lfpb_probability_lines(probabilities: dict) -> list[str]:
+    rows = sorted((int(bin_c), float(probability)) for bin_c, probability in (probabilities or {}).items())
+    material = [(bin_c, probability) for bin_c, probability in rows if probability >= 0.01]
+    if not material:
+        material = sorted(rows, key=lambda row: row[1], reverse=True)[:5]
+        material.sort()
+    return [f"{bin_c:+d} °C: <b>{probability:.1%}</b>" for bin_c, probability in material] or ["Нет данных."]
+
+
+def _format_lfpb_bin(value) -> str:
+    if value is None or pd.isna(value):
+        return "нет данных"
+    return f"{int(value):+d} °C"
+
+
+def _format_lfpb_issue_time(value) -> str:
+    return _format_lfpb_local_time_clean(value) if value else "не указано"
+
+
+def _format_lfpb_local_time_clean(value) -> str:
+    parsed = pd.Timestamp(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.tz_localize("UTC")
+    local = parsed.tz_convert(TIMEZONE)
+    return local.strftime("%d.%m.%Y %H:%M по Парижу")
 
 
 def _format_lfpb_model_change(change: dict | None) -> list[str]:

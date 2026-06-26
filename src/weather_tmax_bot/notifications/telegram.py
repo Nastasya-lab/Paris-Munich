@@ -67,6 +67,16 @@ def notify_if_configured(text: str) -> dict[str, Any]:
 
 
 def format_operational_cycle_message(summary: dict) -> str:
+    forecast = summary.get("forecast", {}) or {}
+    return _format_compact_forecast_message(
+        airport=str(summary.get("airport", "EDDM")),
+        target_date_local=summary.get("target_date_local"),
+        issue_time_utc=summary.get("issue_time_utc"),
+        model_version=summary.get("model_version"),
+        forecast=forecast,
+        latest_metar=summary.get("latest_metar_record") or forecast.get("latest_metar_record") or {},
+        comparison=None,
+    )
     acceptance = summary.get("forecast_acceptance", {})
     quality = summary.get("forecast_quality", {})
     forecast = summary.get("forecast", {})
@@ -109,6 +119,161 @@ def format_operational_cycle_message(summary: dict) -> str:
         f"ID прогноза: <code>{escape(str(summary.get('forecast_id', 'не указан')))}</code>",
     ]
     return "\n".join(lines)
+
+
+def _format_compact_forecast_message(
+    *,
+    airport: str,
+    target_date_local: Any,
+    issue_time_utc: Any,
+    model_version: Any,
+    forecast: dict,
+    latest_metar: dict,
+    comparison: dict | None,
+) -> str:
+    components = forecast.get("forecast_components", {}) or {}
+    variants = forecast.get("forecast_variants", {}) or {}
+    variant_changes = (comparison or {}).get("variants") or {}
+    lines = [
+        f"<b>{escape(_airport_title(airport))}</b>",
+        f"Дата прогноза: <b>{escape(str(target_date_local or 'не указана'))}</b>",
+        f"Выпуск: {_format_airport_local_time(issue_time_utc, airport)}",
+        "",
+        *_format_used_metar(latest_metar, airport),
+        "",
+        *_format_model_block(
+            "Рабочая модель",
+            str(model_version or "не указана"),
+            forecast,
+            (comparison or {}) if comparison else None,
+        ),
+        "",
+        *_format_unimodal_compact_block(components, variants, variant_changes.get("shadow_unimodal_pmf")),
+        "",
+        *_format_wind_compact_block(components, variant_changes.get("shadow_spatial_wind_advection")),
+        "",
+        *_format_compact_short_summary(forecast, components, latest_metar),
+    ]
+    return "\n".join(line for line in lines if line is not None).strip()
+
+
+def _format_model_block(title: str, model_version: str, forecast: dict, change: dict | None = None, extra_lines: list[str] | None = None) -> list[str]:
+    probabilities = forecast.get("probabilities_by_integer_c") or {}
+    lines = [
+        f"<b>{escape(title)}</b>",
+        f"Модель: <code>{escape(str(model_version))}</code>",
+        f"Ожидаемый Tmax: <b>{float(forecast.get('expected_tmax_c', 0.0)):.1f} °C</b>",
+        f"Самый вероятный Tmax: <b>{int(forecast.get('most_likely_integer_c', 0)):+d} °C</b>",
+        "Вероятности:",
+        *_format_plain_probability_lines(probabilities),
+    ]
+    lines.extend(extra_lines or [])
+    lines.extend(_format_model_metar_change(change))
+    return lines
+
+
+def _format_unimodal_compact_block(components: dict, variants: dict, change: dict | None) -> list[str]:
+    candidate = (components or {}).get("unimodal_shadow_candidate") or {}
+    variant = (variants or {}).get("shadow_unimodal_pmf") or {}
+    forecast = candidate.get("forecast") or variant.get("distribution") or {}
+    if not forecast.get("probabilities_by_integer_c"):
+        return ["<b>Unimodal shadow</b>", "Статус: нет данных."]
+    metadata = candidate.get("metadata") or variant.get("metadata") or {}
+    model_version = candidate.get("model_version") or metadata.get("variant_version") or "shadow_unimodal_pmf"
+    return _format_model_block(
+        "Unimodal shadow",
+        str(model_version),
+        forecast,
+        change,
+        [f"Shape violations: {metadata.get('shadow_unimodal_violation_count', 'n/a')}"],
+    )
+
+
+def _format_wind_compact_block(components: dict, change: dict | None) -> list[str]:
+    candidate = (components or {}).get("spatial_wind_advection_candidate") or {}
+    if not candidate or not candidate.get("enabled", False):
+        return ["<b>Wind/advection shadow</b>", "Статус: нет данных."]
+    if not candidate.get("active", False) or not candidate.get("forecast"):
+        reason = str(candidate.get("reason") or "неактивна")
+        return [
+            "<b>Wind/advection shadow</b>",
+            f"Модель: <code>{escape(str(candidate.get('model_version') or 'shadow_spatial_wind_advection'))}</code>",
+            f"Статус: неактивна ({escape(reason)})",
+            *_format_model_metar_change(change),
+        ]
+    forecast = candidate.get("forecast") or {}
+    model_version = candidate.get("model_version") or "shadow_spatial_wind_advection"
+    return _format_model_block("Wind/advection shadow", str(model_version), forecast, change)
+
+
+def _format_compact_short_summary(forecast: dict, components: dict, latest_metar: dict) -> list[str]:
+    unimodal = ((components or {}).get("unimodal_shadow_candidate") or {}).get("forecast") or {}
+    wind = ((components or {}).get("spatial_wind_advection_candidate") or {}).get("forecast") or {}
+    lines = [
+        "<b>Кратко</b>",
+        f"Рабочий прогноз: {_format_bin_value(forecast.get('most_likely_integer_c'))}",
+        f"Unimodal: {_format_bin_value(unimodal.get('most_likely_integer_c'))}",
+        f"Wind/advection: {_format_bin_value(wind.get('most_likely_integer_c'))}",
+    ]
+    if latest_metar.get("temperature_c") is not None:
+        lines.append(f"Последний METAR: {float(latest_metar.get('temperature_c')):.1f} °C")
+    return lines
+
+
+def _format_used_metar(record: dict, airport: str) -> list[str]:
+    if not record:
+        return ["<b>Использованный METAR</b>", "Нет данных."]
+    lines = ["<b>Использованный METAR</b>"]
+    observation_time = record.get("observation_time_utc")
+    if observation_time:
+        lines.append(f"Время: {_format_airport_local_time(observation_time, airport, bold=False)}")
+    if record.get("temperature_c") is not None:
+        lines.append(f"Температура в сыром METAR: {float(record.get('temperature_c')):.1f} °C")
+    raw_metar = record.get("raw_metar")
+    if raw_metar:
+        lines.append(f"Сырая строка: <code>{escape(str(raw_metar))}</code>")
+    return lines
+
+
+def _format_plain_probability_lines(probabilities: dict) -> list[str]:
+    rows = sorted((int(bin_c), float(probability)) for bin_c, probability in (probabilities or {}).items())
+    material = [(bin_c, probability) for bin_c, probability in rows if probability >= 0.01]
+    if not material:
+        material = sorted(rows, key=lambda row: row[1], reverse=True)[:5]
+        material.sort()
+    return [f"{bin_c:+d} °C: <b>{probability:.1%}</b>" for bin_c, probability in material] or ["Нет данных."]
+
+
+def _format_bin_value(value: Any) -> str:
+    if value is None:
+        return "нет данных"
+    return f"{int(value):+d} °C"
+
+
+def _airport_title(airport: str) -> str:
+    code = airport.upper()
+    names = {"EDDM": "EDDM Munich Tmax forecast", "LFPB": "LFPB Paris Tmax forecast"}
+    return names.get(code, f"{code} Tmax forecast")
+
+
+def _airport_timezone(airport: str) -> ZoneInfo:
+    return ZoneInfo("Europe/Paris") if airport.upper() == "LFPB" else ZoneInfo("Europe/Berlin")
+
+
+def _airport_local_suffix(airport: str) -> str:
+    return "Парижу" if airport.upper() == "LFPB" else "Мюнхену"
+
+
+def _format_airport_local_time(value: Any, airport: str, *, bold: bool = True) -> str:
+    if not value:
+        return "не указано"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        localized = parsed.astimezone(_airport_timezone(airport))
+        text = f"{localized:%d.%m.%Y %H:%M} по {_airport_local_suffix(airport)}"
+        return f"<b>{text}</b>" if bold else text
+    except ValueError:
+        return escape(str(value))
 
 
 def _format_temperature_summary(forecast: dict) -> list[str]:
@@ -495,6 +660,15 @@ def _format_source_compatibility(sources: dict) -> list[str]:
 
 
 def format_metar_event_message(payload: dict, comparison: dict, reasons: list[str] | None = None) -> str:
+    return _format_compact_forecast_message(
+        airport=str(payload.get("airport", "EDDM")),
+        target_date_local=payload.get("target_date_local"),
+        issue_time_utc=payload.get("issue_time_utc"),
+        model_version=payload.get("model_version"),
+        forecast=payload,
+        latest_metar=payload.get("latest_metar_record") or {},
+        comparison=comparison,
+    )
     forecast_components = payload.get("forecast_components", {}) or {}
     intraday = forecast_components.get("intraday_update", {}) or {}
     shadow = forecast_components.get("shadow_mode", {}) or {}

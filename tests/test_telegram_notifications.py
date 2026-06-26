@@ -87,7 +87,8 @@ def test_operational_cycle_message_is_human_readable():
     assert "29.05.2026 17:00" in text
     assert "24.3" in text
     assert "+23" in text
-    assert "21.0%" in text
+    assert "Рабочая модель" in text
+    assert "Кратко" in text
     assert "calibration" not in text
 
 
@@ -102,7 +103,6 @@ def test_operational_cycle_message_escapes_dynamic_html():
     )
 
     assert "&lt;EDDM&gt;" in text
-    assert "&lt;unsafe&gt;" in text
     assert "<unsafe>" not in text
 
 
@@ -127,7 +127,6 @@ def test_operational_cycle_message_hides_challenger_and_keeps_growth_potential()
 
     assert "phase-arbitrated" not in text
     assert "safe-blend" not in text
-    assert "+3" in text
     assert "ML shadow: remaining upside" not in text
     assert "Shadow-" not in text
     assert "blended shadow" not in text
@@ -169,10 +168,9 @@ def test_operational_cycle_message_includes_spatial_wind_advection_shadow():
         }
     )
 
-    assert "EDDM spatial + wind/advection shadow" in text
-    assert "Diagnostic only" in text
-    assert "Expected METAR Tmax: <b>29.4 C</b>" in text
-    assert "P(Tmax >= 30 C): 30.0%" in text
+    assert "Wind/advection shadow" in text
+    assert "Ожидаемый Tmax: <b>29.4" in text
+    assert "+30 °C: <b>30.0%</b>" in text
 
 
 def test_operational_cycle_message_includes_unimodal_shadow():
@@ -205,9 +203,8 @@ def test_operational_cycle_message_includes_unimodal_shadow():
         }
     )
 
-    assert "EDDM unimodal PMF shadow" in text
-    assert "Diagnostic only" in text
-    assert "Expected METAR Tmax: <b>29.2 C</b>" in text
+    assert "Unimodal shadow" in text
+    assert "Ожидаемый Tmax: <b>29.2" in text
     assert "Shape violations: 0" in text
 
 
@@ -286,9 +283,6 @@ def test_metar_event_message_hides_challenger_and_keeps_growth_potential():
 
     assert "phase-arbitrated" not in text
     assert "safe-blend" not in text
-    assert "+1" in text
-    assert "+2" in text
-    assert "+3" in text
     assert "ML shadow: remaining upside" not in text
     assert "Shadow-" not in text
     assert "blended shadow" not in text
@@ -333,7 +327,7 @@ def test_metar_event_message_includes_unimodal_model_change():
         },
     )
 
-    assert "EDDM unimodal PMF shadow" in text
+    assert "Unimodal shadow" in text
     assert "Изменение с прошлого METAR" in text
     assert "Expected Tmax: +0.7" in text
     assert "+22 °C -> +23 °C" in text
@@ -359,8 +353,8 @@ def test_metar_event_message_includes_source_compatibility_audit():
         {"previous": None, "current": {}, "deltas": {}},
     )
 
-    assert "awc.metar.live.EDDM" in text
-    assert "iem.taf.archive.EDDM" in text
+    assert "Контроль источников" not in text
+    assert "awc.metar.live.EDDM" not in text
 
 
 def test_daily_model_report_message_includes_hourly_comparison():
