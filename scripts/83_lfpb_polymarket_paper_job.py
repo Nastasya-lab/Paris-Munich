@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from weather_tmax_bot.notifications.telegram import notify_if_configured
@@ -12,6 +12,7 @@ from weather_tmax_bot.polymarket_paper.client import PolymarketPublicClient
 from weather_tmax_bot.polymarket_paper.config import PaperTradingConfig
 from weather_tmax_bot.polymarket_paper.engine import PaperTradingEngine
 from weather_tmax_bot.polymarket_paper.forecast import (
+    PARIS_TIMEZONE,
     is_in_trading_window,
     load_forecast_signal,
 )
@@ -69,7 +70,36 @@ def run_paper_cycle(
     client: PolymarketPublicClient | None = None,
     force_window: bool = False,
 ) -> dict:
-    signal = load_forecast_signal(forecast_path, config.signal_variant)
+    metadata = _read_forecast_metadata(forecast_path)
+    now_utc = datetime.now(UTC)
+    now_local = now_utc.astimezone(PARIS_TIMEZONE)
+    target_date_local = metadata.get("target_date_local")
+    if target_date_local is not None and target_date_local < now_local.date():
+        result = {
+            "status": "stale_forecast",
+            "forecast_id": metadata.get("forecast_id"),
+            "signal_variant": config.signal_variant,
+            "target_date_local": target_date_local.isoformat(),
+            "current_date_local": now_local.date().isoformat(),
+            "created_at_utc": now_utc.isoformat(),
+        }
+        append_decision_log(config.decision_log_path, result)
+        return result
+    try:
+        signal = load_forecast_signal(forecast_path, config.signal_variant)
+    except ValueError as exc:
+        if "has no probability distribution" not in str(exc):
+            raise
+        result = {
+            "status": "missing_signal_variant",
+            "forecast_id": metadata.get("forecast_id"),
+            "signal_variant": config.signal_variant,
+            "target_date_local": target_date_local.isoformat() if target_date_local else None,
+            "error": str(exc),
+            "created_at_utc": now_utc.isoformat(),
+        }
+        append_decision_log(config.decision_log_path, result)
+        return result
     if not force_window and not is_in_trading_window(
         signal,
         start_hour=config.local_hour_start,
@@ -80,6 +110,8 @@ def run_paper_cycle(
             "forecast_id": signal.forecast_id,
             "signal_variant": signal.variant,
             "target_date_local": signal.target_date_local.isoformat(),
+            "issue_time_utc": signal.issue_time_utc.isoformat(),
+            "created_at_utc": now_utc.isoformat(),
         }
         append_decision_log(config.decision_log_path, result)
         return result
@@ -107,6 +139,21 @@ def run_paper_cycle(
     store.save(state)
     append_decision_log(config.decision_log_path, result)
     return result
+
+
+def _read_forecast_metadata(path: Path) -> dict:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    target_date = None
+    raw_target = payload.get("target_date_local")
+    if raw_target:
+        try:
+            target_date = date.fromisoformat(str(raw_target))
+        except ValueError:
+            target_date = None
+    return {
+        "forecast_id": payload.get("forecast_id"),
+        "target_date_local": target_date,
+    }
 
 
 def _activate_lfpb_telegram() -> None:

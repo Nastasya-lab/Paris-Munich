@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -29,6 +30,15 @@ from weather_tmax_bot.polymarket_paper.models import (
 from weather_tmax_bot.polymarket_paper.quotes import quote_buy, quote_sell
 from weather_tmax_bot.polymarket_paper.reporting import format_trade_events
 from weather_tmax_bot.polymarket_paper.state import PaperState, PaperStateStore
+
+
+def _load_paper_job_module():
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "83_lfpb_polymarket_paper_job.py"
+    spec = importlib.util.spec_from_file_location("lfpb_polymarket_paper_job", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_temperature_bucket_mapping_supports_tails_and_negative_values():
@@ -237,6 +247,48 @@ def test_state_round_trip_is_separate_and_persistent(tmp_path):
     loaded = store.load()
     assert loaded.cash_balance_usd == 975.0
     assert loaded.start_balance_usd == 1000.0
+
+
+def test_config_enables_paper_trading_by_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("LFPB_POLYMARKET_PAPER_ENABLED", raising=False)
+    monkeypatch.setenv("LFPB_POLYMARKET_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("LFPB_POLYMARKET_DECISION_LOG_PATH", str(tmp_path / "decisions.jsonl"))
+
+    assert PaperTradingConfig.from_env().enabled is True
+
+    monkeypatch.setenv("LFPB_POLYMARKET_PAPER_ENABLED", "0")
+    assert PaperTradingConfig.from_env().enabled is False
+
+
+def test_paper_job_skips_stale_forecast_before_network(tmp_path):
+    paper_job = _load_paper_job_module()
+    forecast_path = tmp_path / "stale_forecast.json"
+    forecast_path.write_text(
+        json.dumps(
+            {
+                "forecast_id": "stale-1",
+                "airport": "LFPB",
+                "target_date_local": "2026-06-09",
+                "issue_time_utc": "2026-06-09T10:30:00+00:00",
+                "forecast": {"probabilities_by_integer_c": {"25": 1.0}},
+                "forecast_variants": {
+                    "shadow_unimodal_pmf": {
+                        "distribution": {
+                            "probabilities_by_integer_c": {"25": 1.0}
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = _config(tmp_path)
+
+    result = paper_job.run_paper_cycle(forecast_path, config=config, force_window=True)
+
+    assert result["status"] == "stale_forecast"
+    assert result["forecast_id"] == "stale-1"
+    assert config.decision_log_path.exists()
 
 
 def _config(tmp_path: Path) -> PaperTradingConfig:

@@ -39,7 +39,7 @@ class PaperTradingConfig:
     @classmethod
     def from_env(cls) -> "PaperTradingConfig":
         return cls(
-            enabled=_env_bool("LFPB_POLYMARKET_PAPER_ENABLED", False),
+            enabled=_env_bool("LFPB_POLYMARKET_PAPER_ENABLED", True),
             signal_variant=os.getenv("LFPB_POLYMARKET_SIGNAL_VARIANT", "shadow_unimodal_pmf"),
             state_path=Path(
                 os.getenv(
@@ -84,4 +84,3 @@ class PaperTradingConfig:
                 os.getenv("LFPB_POLYMARKET_REQUEST_TIMEOUT_SECONDS", "15")
             ),
         )
-
