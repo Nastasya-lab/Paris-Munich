@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
+import pandas as pd
 
 from weather_tmax_bot.polymarket_paper.client import (
     PolymarketPublicClient,
@@ -237,6 +238,54 @@ def test_engine_settles_position_from_official_token_price(tmp_path):
     assert result["events"][0]["realized_pnl_usd"] == pytest.approx(15.0)
     assert state.cash_balance_usd == pytest.approx(1015.0)
     assert not state.positions
+
+
+def test_paper_job_builds_local_metar_settlement_fallback(tmp_path, monkeypatch):
+    paper_job = _load_paper_job_module()
+    metar_path = tmp_path / "awc_metar_live_LFPB.parquet"
+    pd.DataFrame(
+        [
+            {
+                "observation_time_utc": "2026-06-24T10:00:00+00:00",
+                "temperature_c": 37.0,
+            },
+            {
+                "observation_time_utc": "2026-06-24T13:00:00+00:00",
+                "temperature_c": 39.0,
+            },
+        ]
+    ).to_parquet(metar_path, index=False)
+    monkeypatch.setattr(paper_job, "DEFAULT_METAR_PATH", metar_path)
+    position = PaperPosition(
+        position_id="p-local",
+        market_id="old-market",
+        question="Will the highest temperature in Paris be 39 C on June 24?",
+        token_id="old-yes-token",
+        side="YES",
+        temperature_c=39,
+        tail="exact",
+        target_date_local="2026-06-24",
+        entry_price=0.40,
+        entry_model_probability=0.60,
+        entry_production_probability=0.55,
+        entry_raw_edge=0.20,
+        entry_effective_edge=0.14,
+        size_usd=10.0,
+        shares=25.0,
+        opened_at_utc="2026-06-24T10:00:00+00:00",
+        forecast_id="old",
+        market_slug="missing-from-gamma",
+    )
+
+    payouts, notes = paper_job._local_metar_resolved_token_prices(
+        [position],
+        current_date_local=date(2026, 6, 25),
+        metar_path=metar_path,
+    )
+
+    assert payouts == {"old-yes-token": 1.0}
+    assert notes[0]["actual_metar_tmax_integer_c"] == 39
+    assert notes[0]["reason"] == "local_lfpb_metar_truth_fallback"
 
 
 def test_state_round_trip_is_separate_and_persistent(tmp_path):

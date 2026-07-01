@@ -62,7 +62,7 @@ class PaperTradingConfig:
             max_daily_exposure_fraction=float(
                 os.getenv("LFPB_POLYMARKET_MAX_DAILY_EXPOSURE_PCT", "0.02")
             ),
-            max_positions=int(os.getenv("LFPB_POLYMARKET_MAX_POSITIONS", "2")),
+            max_positions=int(os.getenv("LFPB_POLYMARKET_MAX_POSITIONS", "5")),
             min_contract_price=float(os.getenv("LFPB_POLYMARKET_MIN_CONTRACT_PRICE", "0.02")),
             max_contract_price=float(os.getenv("LFPB_POLYMARKET_MAX_CONTRACT_PRICE", "0.95")),
             min_fill_ratio=float(os.getenv("LFPB_POLYMARKET_MIN_FILL_RATIO", "0.98")),

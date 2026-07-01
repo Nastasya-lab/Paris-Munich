@@ -27,6 +27,7 @@ class PaperTradingEngine:
         snapshot: MarketSnapshot,
         state: PaperState,
         resolved_token_prices: dict[str, float] | None = None,
+        resolved_token_reasons: dict[str, str] | None = None,
     ) -> dict:
         now = datetime.now(UTC).isoformat()
         market_by_id = {market.market_id: market for market in snapshot.markets}
@@ -36,6 +37,7 @@ class PaperTradingEngine:
             signal,
             state,
             resolved_token_prices or {},
+            resolved_token_reasons or {},
             now,
             events,
         )
@@ -63,6 +65,7 @@ class PaperTradingEngine:
         signal: ForecastSignal,
         state: PaperState,
         resolved_token_prices: dict[str, float],
+        resolved_token_reasons: dict[str, str],
         now: str,
         events: list[TradeEvent],
     ) -> None:
@@ -96,7 +99,7 @@ class PaperTradingEngine:
                 raw_edge=0.0,
                 effective_edge=0.0,
                 realized_pnl_usd=pnl,
-                reason="official_polymarket_resolution",
+                reason=resolved_token_reasons.get(position.token_id, "official_polymarket_resolution"),
                 forecast_id=signal.forecast_id,
             )
             state.events.append(event)

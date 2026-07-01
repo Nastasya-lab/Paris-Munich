@@ -7,6 +7,8 @@ import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import pandas as pd
+
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.polymarket_paper.client import PolymarketPublicClient
 from weather_tmax_bot.polymarket_paper.config import PaperTradingConfig
@@ -26,6 +28,7 @@ from weather_tmax_bot.polymarket_paper.state import (
 DEFAULT_FORECAST_PATH = Path(
     "data/reports/latest_lfpb_icon_d2_metar_tmax_prediction.json"
 )
+DEFAULT_METAR_PATH = Path("data/forecasts/awc_metar_live_LFPB.parquet")
 
 
 def main() -> None:
@@ -122,12 +125,23 @@ def run_paper_cycle(
     resolved_token_prices = market_client.fetch_resolved_token_prices(
         {position.market_slug for position in state.positions}
     )
+    fallback_prices, fallback_notes = _local_metar_resolved_token_prices(
+        state.positions,
+        current_date_local=now_local.date(),
+        metar_path=DEFAULT_METAR_PATH,
+    )
+    resolved_token_reasons = {}
+    for token_id, payout in fallback_prices.items():
+        if token_id not in resolved_token_prices:
+            resolved_token_prices[token_id] = payout
+            resolved_token_reasons[token_id] = "local_lfpb_metar_truth_fallback"
     snapshot = market_client.fetch_paris_market(signal.target_date_local)
     result = PaperTradingEngine(config).process(
         signal,
         snapshot,
         state,
         resolved_token_prices=resolved_token_prices,
+        resolved_token_reasons=resolved_token_reasons,
     )
     result.update(
         {
@@ -136,9 +150,74 @@ def run_paper_cycle(
             "created_at_utc": datetime.now(UTC).isoformat(),
         }
     )
+    if fallback_notes:
+        result["local_metar_settlement_fallback"] = fallback_notes
     store.save(state)
     append_decision_log(config.decision_log_path, result)
     return result
+
+
+def _local_metar_resolved_token_prices(
+    positions,
+    *,
+    current_date_local: date,
+    metar_path: Path,
+) -> tuple[dict[str, float], list[dict]]:
+    if not positions or not metar_path.exists():
+        return {}, []
+    frame = pd.read_parquet(metar_path)
+    if frame.empty or "observation_time_utc" not in frame.columns or "temperature_c" not in frame.columns:
+        return {}, []
+    observations = frame.copy()
+    observations["observation_time_utc"] = pd.to_datetime(
+        observations["observation_time_utc"],
+        utc=True,
+        errors="coerce",
+    )
+    observations["temperature_c"] = pd.to_numeric(observations["temperature_c"], errors="coerce")
+    observations = observations.dropna(subset=["observation_time_utc", "temperature_c"])
+    if observations.empty:
+        return {}, []
+    observations["target_date_local"] = observations["observation_time_utc"].dt.tz_convert(PARIS_TIMEZONE).dt.date
+
+    payouts: dict[str, float] = {}
+    notes: list[dict] = []
+    for position in positions:
+        try:
+            target_date = date.fromisoformat(str(position.target_date_local))
+        except ValueError:
+            continue
+        if target_date >= current_date_local:
+            continue
+        day = observations[observations["target_date_local"] == target_date]
+        if day.empty:
+            continue
+        actual_bin = int(round(float(day["temperature_c"].max())))
+        yes_wins = _bucket_wins(actual_bin, int(position.temperature_c), str(position.tail))
+        token_wins = yes_wins if position.side == "YES" else not yes_wins
+        payout = 1.0 if token_wins else 0.0
+        payouts[str(position.token_id)] = payout
+        notes.append(
+            {
+                "position_id": position.position_id,
+                "target_date_local": target_date.isoformat(),
+                "actual_metar_tmax_integer_c": actual_bin,
+                "side": position.side,
+                "temperature_c": position.temperature_c,
+                "tail": position.tail,
+                "payout": payout,
+                "reason": "local_lfpb_metar_truth_fallback",
+            }
+        )
+    return payouts, notes
+
+
+def _bucket_wins(actual_bin: int, temperature_c: int, tail: str) -> bool:
+    if tail == "or_higher":
+        return actual_bin >= temperature_c
+    if tail == "or_lower":
+        return actual_bin <= temperature_c
+    return actual_bin == temperature_c
 
 
 def _read_forecast_metadata(path: Path) -> dict:
