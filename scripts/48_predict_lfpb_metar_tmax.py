@@ -48,6 +48,9 @@ SPATIAL_CANDIDATE_MODEL_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial
 SPATIAL_CANDIDATE_METADATA_PATH = Path("data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json")
 SPATIAL_CANDIDATE_LOCAL_HOUR_START = 12
 SPATIAL_CANDIDATE_LOCAL_HOUR_END = 18
+HAZARD_SHADOW_MODEL_PATH = Path("data/models/lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.joblib")
+HAZARD_SHADOW_METADATA_PATH = Path("data/models/lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.metadata.json")
+HAZARD_SHADOW_VARIANT = "shadow_discrete_hazard"
 UNIMODAL_SHADOW_VARIANT = "shadow_unimodal_pmf"
 UNIMODAL_SHADOW_VERSION = "lfpb_pmf_temperature_unimodal_shadow_v1"
 UNIMODAL_SHADOW_TEMPERATURE = 0.67
@@ -107,6 +110,13 @@ def main() -> None:
         issue_time_utc=issue_time_utc,
         base_feature_row=feature_row,
     )
+    hazard_shadow_candidate = _predict_hazard_shadow_candidate(
+        enabled=args.hazard_shadow,
+        target_date=target_date,
+        issue_time_utc=issue_time_utc,
+        base_feature_row=feature_row,
+        champion_distribution=distribution,
+    )
     base_production_distribution = distribution
     base_production_model_version = metadata.get("model_version", "lfpb_metar_tmax_upside_v1")
     production_selection = {
@@ -144,6 +154,7 @@ def main() -> None:
         feature_row=feature_row,
         unimodal_shadow_candidate=unimodal_shadow_candidate,
         spatial_candidate=spatial_candidate,
+        hazard_shadow_candidate=hazard_shadow_candidate,
     )
     nwp_source_diagnostics = _build_nwp_source_diagnostics(feature_row)
     previous_record = _latest_forecast_record(
@@ -169,6 +180,7 @@ def main() -> None:
                 "production_selection": production_selection,
                 "nwp_source_diagnostics": nwp_source_diagnostics,
                 "spatial_candidate": spatial_candidate,
+                "hazard_shadow_candidate": hazard_shadow_candidate,
                 "forecast_variants": forecast_variants,
                 "unimodal_shadow_candidate": unimodal_shadow_candidate,
             },
@@ -191,6 +203,7 @@ def main() -> None:
         "intraday_survival_layer": survival_adjustment.details,
         "production_selection": production_selection,
         "spatial_candidate": spatial_candidate,
+        "hazard_shadow_candidate": hazard_shadow_candidate,
         "forecast_variants": forecast_variants,
         "unimodal_shadow_candidate": unimodal_shadow_candidate,
         "metar_signal": {
@@ -412,6 +425,92 @@ def _predict_spatial_candidate(
         return {**base, "reason": f"spatial_candidate_unavailable:{exc}"}
 
 
+def _predict_hazard_shadow_candidate(
+    *,
+    enabled: bool,
+    target_date: date,
+    issue_time_utc,
+    base_feature_row: dict,
+    champion_distribution: TmaxDistribution,
+) -> dict:
+    local_hour = int(pd.Timestamp(issue_time_utc).tz_convert(TIMEZONE).hour)
+    base = {
+        "enabled": bool(enabled),
+        "active": False,
+        "status": "shadow_only_does_not_affect_operational_forecast",
+        "variant": HAZARD_SHADOW_VARIANT,
+        "local_issue_hour": local_hour,
+        "model_version": None,
+        "reason": None,
+    }
+    if not enabled:
+        return {**base, "reason": "hazard_shadow_disabled"}
+    if not HAZARD_SHADOW_MODEL_PATH.exists():
+        return {**base, "reason": f"missing_model:{HAZARD_SHADOW_MODEL_PATH}"}
+    try:
+        neighbor_metars = {station: _load_metar(station) for station in DEFAULT_SPATIAL_STATIONS}
+        spatial_features = build_spatial_metar_features(
+            base_feature_row,
+            neighbor_metars,
+            target_date_local=target_date,
+            issue_time_utc=issue_time_utc,
+            timezone_name=TIMEZONE,
+            stations=DEFAULT_SPATIAL_STATIONS,
+        )
+        station_metars = {"LFPB": _load_metar("LFPB"), **neighbor_metars}
+        advection_features = build_wind_advection_features(
+            station_metars,
+            target_date_local=target_date,
+            issue_time_utc=issue_time_utc,
+            timezone_name=TIMEZONE,
+            stations=DEFAULT_ADVECTION_STATIONS,
+        )
+        if not spatial_features.get("spatial_leakage_check_passed", False):
+            return {**base, "reason": "hazard_shadow_spatial_leakage_check_failed"}
+        if not advection_features.get("adv_leakage_check_passed", False):
+            return {**base, "reason": "hazard_shadow_wind_advection_leakage_check_failed"}
+        hazard_row = {**base_feature_row, **spatial_features, **advection_features}
+        model = joblib.load(HAZARD_SHADOW_MODEL_PATH)
+        metadata = _load_json(HAZARD_SHADOW_METADATA_PATH)
+        raw_distribution = model.predict_distribution(hazard_row)
+        survival_adjustment = apply_metar_intraday_survival_layer(
+            raw_distribution,
+            hazard_row,
+            historical_dataset_path=SURVIVAL_DATASET_PATH,
+        )
+        distribution = survival_adjustment.distribution
+        forecast = distribution.to_payload()
+        champion = champion_distribution.to_payload()
+        return {
+            **base,
+            "active": True,
+            "reason": "active_discrete_hazard_shadow",
+            "model_version": metadata.get("model_version", getattr(model, "model_version", HAZARD_SHADOW_VARIANT)),
+            "forecast": forecast,
+            "forecast_before_intraday_survival": raw_distribution.to_payload(),
+            "intraday_survival_layer": survival_adjustment.details,
+            "comparison_to_champion": {
+                "expected_tmax_delta_c": distribution.expected_tmax_c - champion_distribution.expected_tmax_c,
+                "most_likely_integer_delta_c": distribution.most_likely_integer_c - champion_distribution.most_likely_integer_c,
+                "ge_30_probability_delta": (
+                    forecast["threshold_probabilities"].get("ge_30", 0.0)
+                    - champion["threshold_probabilities"].get("ge_30", 0.0)
+                ),
+            },
+            "shape": _shape_summary(distribution),
+            "metadata": {
+                "variant_version": metadata.get("model_version", HAZARD_SHADOW_VARIANT),
+                "status": "shadow_only_does_not_affect_operational_forecast",
+                "calibration_method": (metadata.get("calibration_metadata") or {}).get("calibration_method"),
+                "holdout_metrics": metadata.get("holdout_metrics") or {},
+                "unimodal_violation_count": unimodal_violation_count(distribution),
+                "local_issue_hour": local_hour,
+            },
+        }
+    except Exception as exc:
+        return {**base, "reason": f"hazard_shadow_unavailable:{exc}"}
+
+
 def _refresh_open_meteo_live(airport: str, target_date_local: date | None) -> dict:
     target = target_date_local or date.today()
     rows = fetch_open_meteo_live_extract(
@@ -582,6 +681,7 @@ def _build_forecast_variants(
     feature_row: dict,
     unimodal_shadow_candidate: dict,
     spatial_candidate: dict | None = None,
+    hazard_shadow_candidate: dict | None = None,
 ) -> dict:
     local_issue_hour = _clean_optional_float(feature_row.get("local_issue_hour"))
     variants = {
@@ -610,6 +710,13 @@ def _build_forecast_variants(
                 "local_issue_hour": local_issue_hour,
                 "target": "METAR_Tmax",
             },
+        }
+    hazard = hazard_shadow_candidate or {}
+    if hazard.get("active") and hazard.get("forecast"):
+        variants[HAZARD_SHADOW_VARIANT] = {
+            "description": "LFPB discrete hazard remaining-upside shadow distribution; diagnostic only.",
+            "distribution": hazard.get("forecast") or {},
+            "metadata": hazard.get("metadata") or {},
         }
     return variants
 def _build_unimodal_shadow_candidate(
@@ -847,6 +954,8 @@ def _format_lfpb_compact_message(payload: dict) -> str:
         "",
         *_format_lfpb_wind_compact_block(payload, variant_changes.get("shadow_spatial_wind_advection")),
         "",
+        *_format_lfpb_hazard_compact_block(payload, variants, variant_changes.get(HAZARD_SHADOW_VARIANT)),
+        "",
         *_format_lfpb_short_summary(payload),
     ]
     return "\n".join(line for line in lines if line is not None).strip()
@@ -899,17 +1008,43 @@ def _format_lfpb_wind_compact_block(payload: dict, change: dict | None) -> list[
     return _format_lfpb_model_block("Wind/advection shadow", str(model_version), forecast, change)
 
 
+def _format_lfpb_hazard_compact_block(payload: dict, variants: dict, change: dict | None) -> list[str]:
+    candidate = payload.get("hazard_shadow_candidate") or {}
+    shadow = variants.get(HAZARD_SHADOW_VARIANT) or {}
+    forecast = candidate.get("forecast") or shadow.get("distribution") or {}
+    if not candidate.get("enabled", False):
+        return ["<b>Discrete hazard shadow</b>", "Status: no data."]
+    if not candidate.get("active", False) or not forecast.get("probabilities_by_integer_c"):
+        reason = str(candidate.get("reason") or "inactive")
+        return [
+            "<b>Discrete hazard shadow</b>",
+            f"Model: <code>{candidate.get('model_version') or HAZARD_SHADOW_VARIANT}</code>",
+            f"Status: inactive ({reason})",
+            *_format_lfpb_model_change_clean(change),
+        ]
+    metadata = candidate.get("metadata") or shadow.get("metadata") or {}
+    model_version = candidate.get("model_version") or metadata.get("variant_version") or HAZARD_SHADOW_VARIANT
+    comparison = candidate.get("comparison_to_champion") or {}
+    extra = [
+        f"Shape violations: {metadata.get('unimodal_violation_count', 'n/a')}",
+        f"Expected vs working: {_fmt_delta(comparison.get('expected_tmax_delta_c'))}",
+    ]
+    return _format_lfpb_model_block("Discrete hazard shadow", str(model_version), forecast, change, extra)
+
+
 def _format_lfpb_short_summary(payload: dict) -> list[str]:
     forecast = payload.get("forecast") or {}
     variants = payload.get("forecast_variants") or {}
     unimodal = ((variants.get(UNIMODAL_SHADOW_VARIANT) or {}).get("distribution") or {})
     wind = ((payload.get("spatial_candidate") or {}).get("forecast") or {})
+    hazard = ((payload.get("hazard_shadow_candidate") or {}).get("forecast") or {})
     signal = payload.get("metar_signal") or {}
     lines = [
         "<b>Кратко</b>",
         f"Рабочий прогноз: {_format_lfpb_bin(forecast.get('most_likely_integer_c'))}",
         f"Unimodal: {_format_lfpb_bin(unimodal.get('most_likely_integer_c'))}",
         f"Wind/advection: {_format_lfpb_bin(wind.get('most_likely_integer_c'))}",
+        f"Discrete hazard: {_format_lfpb_bin(hazard.get('most_likely_integer_c'))}",
     ]
     if signal.get("latest_metar_temp_c") is not None:
         lines.append(f"Последний METAR: {float(signal.get('latest_metar_temp_c')):.1f} °C")
@@ -1191,6 +1326,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--metadata-path", type=Path, default=METADATA_PATH)
     parser.add_argument("--spatial-candidate", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--promote-spatial-candidate", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--hazard-shadow", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--report-path", default="data/reports/latest_lfpb_metar_tmax_prediction.json")
     return parser.parse_args()
 

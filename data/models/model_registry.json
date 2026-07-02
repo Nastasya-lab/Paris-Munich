@@ -169,6 +169,29 @@
         "brier_upside_ge_2c": 0.0413974272844435,
         "brier_upside_ge_3c": 0.034119251014225326
       }
+    },
+    {
+      "version": "lfpb_discrete_hazard_spatial_wind_advection_shadow_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.joblib",
+      "metadata_path": "data\\models\\lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.metadata.json",
+      "metrics": {
+        "model_variant": "lfpb_discrete_hazard_spatial_wind_advection_shadow_v1",
+        "rows": 488,
+        "distinct_days": 61,
+        "mae_expected": 0.572412644989894,
+        "rmse_expected": 0.8114453128650578,
+        "bias_expected": 0.2340706449179577,
+        "mean_nll": 1.0402177432485438,
+        "mean_crps": 0.026969602289003074,
+        "brier_upside_ge_1c": 0.04675354770871849,
+        "brier_upside_ge_2c": 0.043674076316928434,
+        "brier_upside_ge_3c": 0.05282557447274441,
+        "coverage_80": 0.9467213114754098,
+        "mode_hit_rate": 0.5819672131147541,
+        "mode_error_ge_2c_rate": 0.07991803278688525,
+        "mean_shape_violations": 1.4795081967213115
+      }
     }
   ],
   "promotion": {
