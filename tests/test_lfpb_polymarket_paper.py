@@ -96,6 +96,10 @@ def test_forecast_loader_uses_only_requested_shadow_variant(tmp_path):
     assert signal.production_probabilities == {25: 0.8, 26: 0.2}
     assert is_in_trading_window(signal, start_hour=10, end_hour=17)
 
+    production_signal = load_forecast_signal(path, "production_champion")
+    assert production_signal.shadow_probabilities == {25: 0.8, 26: 0.2}
+    assert production_signal.production_probabilities == {25: 0.8, 26: 0.2}
+
     with pytest.raises(ValueError, match="has no probability"):
         load_forecast_signal(path, "production_champion_missing")
 
@@ -304,6 +308,7 @@ def test_config_enables_paper_trading_by_default(monkeypatch, tmp_path):
     monkeypatch.setenv("LFPB_POLYMARKET_DECISION_LOG_PATH", str(tmp_path / "decisions.jsonl"))
 
     assert PaperTradingConfig.from_env().enabled is True
+    assert PaperTradingConfig.from_env().signal_variant == "production_champion"
 
     monkeypatch.setenv("LFPB_POLYMARKET_PAPER_ENABLED", "0")
     assert PaperTradingConfig.from_env().enabled is False

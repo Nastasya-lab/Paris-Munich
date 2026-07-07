@@ -27,6 +27,8 @@ def load_forecast_signal(path: Path, variant: str) -> ForecastSignal:
     variants = payload.get("forecast_variants") or {}
     variant_payload = variants.get(variant) or {}
     distribution = variant_payload.get("distribution") or {}
+    if variant == "production_champion" and not distribution:
+        distribution = payload.get("forecast") or {}
     shadow = _normalize_probabilities(distribution.get("probabilities_by_integer_c") or {})
     if not shadow:
         raise ValueError(f"Forecast variant {variant!r} has no probability distribution")
@@ -68,4 +70,3 @@ def _normalize_probabilities(values: dict) -> dict[int, float]:
     if total <= 0:
         return {}
     return {bin_c: probability / total for bin_c, probability in probabilities.items()}
-

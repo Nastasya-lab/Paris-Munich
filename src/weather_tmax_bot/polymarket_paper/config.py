@@ -40,7 +40,7 @@ class PaperTradingConfig:
     def from_env(cls) -> "PaperTradingConfig":
         return cls(
             enabled=_env_bool("LFPB_POLYMARKET_PAPER_ENABLED", True),
-            signal_variant=os.getenv("LFPB_POLYMARKET_SIGNAL_VARIANT", "shadow_unimodal_pmf"),
+            signal_variant=os.getenv("LFPB_POLYMARKET_SIGNAL_VARIANT", "production_champion"),
             state_path=Path(
                 os.getenv(
                     "LFPB_POLYMARKET_STATE_PATH",

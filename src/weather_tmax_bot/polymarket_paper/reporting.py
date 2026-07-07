@@ -5,6 +5,7 @@ from html import escape
 
 def format_trade_events(result: dict) -> list[str]:
     messages = []
+    signal_label = _signal_label(result.get("signal_variant"))
     settlement_note = (
         "Settlement проверен"
         if result.get("settlement_verified")
@@ -16,11 +17,11 @@ def format_trade_events(result: dict) -> list[str]:
         temperature = _temperature_label(str(event["question"]))
         lines = [
             f"<b>POLYMARKET PAPER - PARIS - {escape(action)}</b>",
-            "Источник сигнала: <b>shadow-unimodal</b>",
+            f"Источник сигнала: <b>{escape(signal_label)}</b>",
             f"{escape(settlement_note)}",
             "",
             f"{escape(action)} {escape(side)}: <b>{escape(temperature)}</b>",
-            f"Вероятность shadow: <b>{float(event['model_probability']):.1%}</b>",
+            f"Вероятность сигнала: <b>{float(event['model_probability']):.1%}</b>",
         ]
         production = event.get("production_probability")
         if production is not None:
@@ -45,6 +46,15 @@ def format_trade_events(result: dict) -> list[str]:
         )
         messages.append("\n".join(lines))
     return messages
+
+
+def _signal_label(variant: object) -> str:
+    value = str(variant or "production_champion")
+    labels = {
+        "production_champion": "production",
+        "shadow_unimodal_pmf": "shadow-unimodal",
+    }
+    return labels.get(value, value.replace("_", "-"))
 
 
 def _temperature_label(question: str) -> str:

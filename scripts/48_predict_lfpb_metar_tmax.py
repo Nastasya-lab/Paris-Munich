@@ -120,34 +120,32 @@ def main() -> None:
     base_production_distribution = distribution
     base_production_model_version = metadata.get("model_version", "lfpb_metar_tmax_upside_v1")
     production_selection = {
-        "selected": "base_icon_d2",
-        "reason": "spatial_candidate_not_promoted",
+        "selected": "unimodal_projection",
+        "reason": "unimodal_projection_promoted_to_production",
         "promote_spatial_candidate_requested": bool(args.promote_spatial_candidate),
+        "promote_spatial_candidate_ignored": bool(args.promote_spatial_candidate),
+        "base_model_version": base_production_model_version,
+        "production_model_version": UNIMODAL_SHADOW_VERSION,
     }
-    if args.promote_spatial_candidate and spatial_candidate.get("active"):
-        promoted = _distribution_from_payload(spatial_candidate.get("forecast"))
-        if promoted is not None:
-            distribution = promoted
-            production_selection = {
-                "selected": "spatial_wind_advection_candidate",
-                "reason": "active_spatial_candidate_promoted_by_job_flag",
-                "promote_spatial_candidate_requested": True,
-                "base_model_version": base_production_model_version,
-                "promoted_model_version": spatial_candidate.get("model_version"),
-                "base_expected_tmax_c": base_production_distribution.expected_tmax_c,
-                "promoted_expected_tmax_c": distribution.expected_tmax_c,
-            }
-            feature_row["production_expected_tmax_c"] = distribution.expected_tmax_c
-    production_model_version = (
-        spatial_candidate.get("model_version")
-        if production_selection["selected"] == "spatial_wind_advection_candidate"
-        else base_production_model_version
-    )
     unimodal_shadow_candidate = _build_unimodal_shadow_candidate(
-        distribution,
-        champion_model_version=production_model_version,
+        base_production_distribution,
+        champion_model_version=base_production_model_version,
         feature_row=feature_row,
     )
+    unimodal_shadow_candidate["status"] = "promoted_to_production"
+    unimodal_shadow_candidate.setdefault("metadata", {})["status"] = "promoted_to_production"
+    distribution = _distribution_from_payload(unimodal_shadow_candidate.get("forecast")) or base_production_distribution
+    production_model_version = UNIMODAL_SHADOW_VERSION
+    production_selection.update(
+        {
+            "base_expected_tmax_c": base_production_distribution.expected_tmax_c,
+            "production_expected_tmax_c": distribution.expected_tmax_c,
+            "expected_tmax_delta_c": distribution.expected_tmax_c - base_production_distribution.expected_tmax_c,
+        }
+    )
+    feature_row["production_expected_tmax_c"] = distribution.expected_tmax_c
+    _update_candidate_comparison(spatial_candidate, distribution)
+    _update_candidate_comparison(hazard_shadow_candidate, distribution)
     forecast_variants = _build_forecast_variants(
         distribution,
         production_model_version=production_model_version,
@@ -177,6 +175,7 @@ def main() -> None:
                 "intraday_survival_layer": survival_adjustment.details,
                 "base_forecast_before_intraday_survival": base_distribution.to_payload(),
                 "base_production_before_spatial_promotion": base_production_distribution.to_payload(),
+                "base_production_before_unimodal_promotion": base_production_distribution.to_payload(),
                 "production_selection": production_selection,
                 "nwp_source_diagnostics": nwp_source_diagnostics,
                 "spatial_candidate": spatial_candidate,
@@ -200,6 +199,7 @@ def main() -> None:
         "forecast": distribution.to_payload(),
         "base_forecast_before_intraday_survival": base_distribution.to_payload(),
         "base_production_before_spatial_promotion": base_production_distribution.to_payload(),
+        "base_production_before_unimodal_promotion": base_production_distribution.to_payload(),
         "intraday_survival_layer": survival_adjustment.details,
         "production_selection": production_selection,
         "spatial_candidate": spatial_candidate,
@@ -301,20 +301,16 @@ def _predict_spatial_candidate(
     base_feature_row: dict,
 ) -> dict:
     local_hour = int(pd.Timestamp(issue_time_utc).tz_convert(TIMEZONE).hour)
-    active_window = [SPATIAL_CANDIDATE_LOCAL_HOUR_START, SPATIAL_CANDIDATE_LOCAL_HOUR_END]
     base = {
         "enabled": bool(enabled),
         "active": False,
-        "active_local_hour_window": active_window,
+        "active_local_hour_window": "all_day",
         "local_issue_hour": local_hour,
         "model_version": None,
         "reason": None,
     }
     if not enabled:
         base["reason"] = "spatial_candidate_disabled"
-        return base
-    if not (SPATIAL_CANDIDATE_LOCAL_HOUR_START <= local_hour <= SPATIAL_CANDIDATE_LOCAL_HOUR_END):
-        base["reason"] = "outside_spatial_candidate_local_hour_window"
         return base
     if not SPATIAL_CANDIDATE_MODEL_PATH.exists():
         base["reason"] = f"missing_model:{SPATIAL_CANDIDATE_MODEL_PATH}"
@@ -360,7 +356,7 @@ def _predict_spatial_candidate(
         return {
             **base,
             "active": True,
-            "reason": "active_midday_spatial_wind_advection_candidate",
+            "reason": "active_all_day_spatial_wind_advection_shadow",
             "model_version": metadata.get("model_version", getattr(model, "model_version", "spatial_wind_advection_candidate")),
             "forecast": final_distribution.to_payload(),
             "forecast_before_intraday_survival": raw_distribution.to_payload(),
@@ -674,6 +670,25 @@ def _distribution_from_payload(payload: dict | None) -> TmaxDistribution | None:
     return TmaxDistribution(bins, probs)
 
 
+def _update_candidate_comparison(candidate: dict | None, champion_distribution: TmaxDistribution) -> None:
+    if not candidate or not candidate.get("forecast"):
+        return
+    distribution = _distribution_from_payload(candidate.get("forecast"))
+    if distribution is None:
+        return
+    forecast = distribution.to_payload()
+    champion = champion_distribution.to_payload()
+    candidate["expected_delta_vs_production_c"] = distribution.expected_tmax_c - champion_distribution.expected_tmax_c
+    candidate["comparison_to_champion"] = {
+        "expected_tmax_delta_c": distribution.expected_tmax_c - champion_distribution.expected_tmax_c,
+        "most_likely_integer_delta_c": distribution.most_likely_integer_c - champion_distribution.most_likely_integer_c,
+        "ge_30_probability_delta": (
+            forecast["threshold_probabilities"].get("ge_30", 0.0)
+            - champion["threshold_probabilities"].get("ge_30", 0.0)
+        ),
+    }
+
+
 def _build_forecast_variants(
     distribution: TmaxDistribution,
     *,
@@ -695,7 +710,7 @@ def _build_forecast_variants(
             },
         },
         UNIMODAL_SHADOW_VARIANT: {
-            "description": "Shadow-only temperature-scaled unimodal PMF candidate; does not affect Telegram forecast.",
+            "description": "Temperature-scaled unimodal PMF promoted to production; kept as a compatibility alias.",
             "distribution": (unimodal_shadow_candidate.get("forecast") or {}),
             "metadata": unimodal_shadow_candidate.get("metadata") or {},
         },
@@ -950,8 +965,6 @@ def _format_lfpb_compact_message(payload: dict) -> str:
             comparison,
         ),
         "",
-        *_format_lfpb_unimodal_compact_block(payload, variants, variant_changes.get(UNIMODAL_SHADOW_VARIANT)),
-        "",
         *_format_lfpb_wind_compact_block(payload, variant_changes.get("shadow_spatial_wind_advection")),
         "",
         *_format_lfpb_hazard_compact_block(payload, variants, variant_changes.get(HAZARD_SHADOW_VARIANT)),
@@ -1034,15 +1047,12 @@ def _format_lfpb_hazard_compact_block(payload: dict, variants: dict, change: dic
 
 def _format_lfpb_short_summary(payload: dict) -> list[str]:
     forecast = payload.get("forecast") or {}
-    variants = payload.get("forecast_variants") or {}
-    unimodal = ((variants.get(UNIMODAL_SHADOW_VARIANT) or {}).get("distribution") or {})
     wind = ((payload.get("spatial_candidate") or {}).get("forecast") or {})
     hazard = ((payload.get("hazard_shadow_candidate") or {}).get("forecast") or {})
     signal = payload.get("metar_signal") or {}
     lines = [
         "<b>Кратко</b>",
         f"Рабочий прогноз: {_format_lfpb_bin(forecast.get('most_likely_integer_c'))}",
-        f"Unimodal: {_format_lfpb_bin(unimodal.get('most_likely_integer_c'))}",
         f"Wind/advection: {_format_lfpb_bin(wind.get('most_likely_integer_c'))}",
         f"Discrete hazard: {_format_lfpb_bin(hazard.get('most_likely_integer_c'))}",
     ]
