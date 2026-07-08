@@ -20,6 +20,10 @@ data/**
 !data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json
 !data/models/lfpb_metar_tmax_icon_d2_v1.joblib
 !data/models/lfpb_metar_tmax_icon_d2_v1.metadata.json
+!data/models/lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.joblib
+!data/models/lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.metadata.json
+!data/models/lfpb_hf_icon_eu_residual_pmf_shadow_v1.joblib
+!data/models/lfpb_hf_icon_eu_residual_pmf_shadow_v1.metadata.json
 !data/models/model_registry.json
 !data/models/nwp_residual_icon_d2_20260531.joblib
 !data/models/nwp_residual_icon_d2_20260531.metadata.json

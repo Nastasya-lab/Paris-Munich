@@ -192,6 +192,25 @@
         "mode_error_ge_2c_rate": 0.07991803278688525,
         "mean_shape_violations": 1.4795081967213115
       }
+    },
+    {
+      "version": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\lfpb_hf_icon_eu_residual_pmf_shadow_v1.joblib",
+      "metadata_path": "data\\models\\lfpb_hf_icon_eu_residual_pmf_shadow_v1.metadata.json",
+      "metrics": {
+        "model_variant": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+        "rows": 918,
+        "distinct_days": 352,
+        "mae_expected": 0.8109577047674438,
+        "rmse_expected": 1.0201919011721936,
+        "bias_expected": 0.026200824899502283,
+        "mean_nll": 1.439670942936347,
+        "mean_crps": 0.037078369847885075,
+        "mode_hit_rate": 0.3812636165577342,
+        "mode_error_ge_2c_rate": 0.13725490196078433,
+        "mean_shape_violations": 0.0
+      }
     }
   ],
   "promotion": {

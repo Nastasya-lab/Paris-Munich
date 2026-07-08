@@ -1,0 +1,114 @@
+{
+  "model_name": "lfpb_hf_icon_eu_residual_pmf_shadow",
+  "model_version": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+  "airport": "LFPB",
+  "target": "daily maximum temperature reported by METAR",
+  "role": "shadow_diagnostic",
+  "training_source": "openclimatefix/dwd-icon-eu nearest LFPB grid point",
+  "runtime_source_note": "Runtime may use Open-Meteo ICON-EU live aggregates when HF archive is not current.",
+  "feature_set_version": "lfpb.hf_icon_eu.minimal_residual_pmf.v1",
+  "included_run_hours": [
+    0,
+    6,
+    12
+  ],
+  "usable_rows": 4762,
+  "days_joined": 1759,
+  "target_period": [
+    "2020-01-01",
+    "2025-08-12"
+  ],
+  "split": {
+    "method": "chronological_60_20_20_by_target_day",
+    "train_start": "2020-01-01",
+    "train_end": "2023-03-30",
+    "calibration_start": "2023-03-31",
+    "calibration_end": "2024-06-17",
+    "test_start": "2024-06-18",
+    "test_end": "2025-08-12",
+    "train_days": 1055,
+    "calibration_days": 352,
+    "test_days": 352
+  },
+  "holdout_metrics": {
+    "model_variant": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+    "rows": 918,
+    "distinct_days": 352,
+    "mae_expected": 0.8109577047674438,
+    "rmse_expected": 1.0201919011721936,
+    "bias_expected": 0.026200824899502283,
+    "mean_nll": 1.439670942936347,
+    "mean_crps": 0.037078369847885075,
+    "mode_hit_rate": 0.3812636165577342,
+    "mode_error_ge_2c_rate": 0.13725490196078433,
+    "mean_shape_violations": 0.0
+  },
+  "by_run_hour": [
+    {
+      "model_variant": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+      "model_run_hour": 0,
+      "rows": 352,
+      "distinct_days": 352,
+      "mae_expected": 0.8893042445,
+      "rmse_expected": 1.095546639,
+      "bias_expected": 0.0188513436,
+      "mean_nll": 1.5268754272,
+      "mean_crps": 0.0403083684,
+      "mode_hit_rate": 0.3153409091,
+      "mode_error_ge_2c_rate": 0.1647727273,
+      "mean_shape_violations": 0.0
+    },
+    {
+      "model_variant": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+      "model_run_hour": 6,
+      "rows": 325,
+      "distinct_days": 325,
+      "mae_expected": 0.8476637487,
+      "rmse_expected": 1.0690297518,
+      "bias_expected": 0.0457490532,
+      "mean_nll": 1.5028057721,
+      "mean_crps": 0.0385703547,
+      "mode_hit_rate": 0.3846153846,
+      "mode_error_ge_2c_rate": 0.1630769231,
+      "mean_shape_violations": 0.0
+    },
+    {
+      "model_variant": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+      "model_run_hour": 12,
+      "rows": 241,
+      "distinct_days": 241,
+      "mae_expected": 0.6470263925,
+      "rmse_expected": 0.8187388197,
+      "bias_expected": 0.0105736184,
+      "mean_nll": 1.2271614079,
+      "mean_crps": 0.0303486828,
+      "mode_hit_rate": 0.4730290456,
+      "mode_error_ge_2c_rate": 0.0622406639,
+      "mean_shape_violations": 0.0
+    }
+  ],
+  "model_metadata": {
+    "model_family": "hf_icon_eu_residual_pmf_shadow",
+    "model_version": "lfpb_hf_icon_eu_residual_pmf_shadow_v1",
+    "run_hours": [
+      0,
+      6,
+      12
+    ],
+    "samples_by_run_hour": {
+      "0": 1734,
+      "6": 1564,
+      "12": 1464
+    },
+    "global_samples": 4762,
+    "minimum_run_hour_samples": 30
+  },
+  "limitations": [
+    "Shadow only; does not affect production probabilities or trading unless explicitly promoted later.",
+    "HF archive is historical and not current for 2026; live usage relies on compatible ICON-EU runtime features.",
+    "Minimal variable set uses temperature-derived features only in v1.",
+    "18Z is excluded by default because previous backtests showed weaker same-day behavior."
+  ],
+  "data_snapshot_hash": "c47ad4aa73cafeb8419920cd2eab8f47fba4ced7dcdeed64c0aec2cc8fceefa0",
+  "created_at_utc": "2026-07-07T21:13:32.454285+00:00"
+}

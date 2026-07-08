@@ -22,6 +22,7 @@ from weather_tmax_bot.models.distribution import (
     temperature_scale_distribution,
     unimodal_violation_count,
 )
+from weather_tmax_bot.models.hf_icon_eu_shadow import build_hf_icon_eu_live_feature_row
 from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.operations.metar_event import compare_forecast_to_previous
@@ -36,6 +37,7 @@ LONGITUDE = 2.441389
 MODEL_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.joblib")
 METADATA_PATH = Path("data/models/lfpb_metar_tmax_upside_v1.metadata.json")
 LIVE_NWP_PATH = Path("data/forecasts/open_meteo_archive_LFPB.parquet")
+LIVE_ICON_EU_NWP_PATH = Path("data/forecasts/open_meteo_archive_icon_eu_LFPB.parquet")
 ENHANCED_ICON_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_icon_d2_LFPB_enhanced.parquet")
 HISTORICAL_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_icon_d2_LFPB.parquet")
 ECMWF_NWP_PATH = Path("data/forecasts/open_meteo_single_runs_ecmwf_ifs_LFPB.parquet")
@@ -51,6 +53,9 @@ SPATIAL_CANDIDATE_LOCAL_HOUR_END = 18
 HAZARD_SHADOW_MODEL_PATH = Path("data/models/lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.joblib")
 HAZARD_SHADOW_METADATA_PATH = Path("data/models/lfpb_discrete_hazard_spatial_wind_advection_shadow_v1.metadata.json")
 HAZARD_SHADOW_VARIANT = "shadow_discrete_hazard"
+HF_ICON_EU_SHADOW_MODEL_PATH = Path("data/models/lfpb_hf_icon_eu_residual_pmf_shadow_v1.joblib")
+HF_ICON_EU_SHADOW_METADATA_PATH = Path("data/models/lfpb_hf_icon_eu_residual_pmf_shadow_v1.metadata.json")
+HF_ICON_EU_SHADOW_VARIANT = "shadow_hf_icon_eu"
 UNIMODAL_SHADOW_VARIANT = "shadow_unimodal_pmf"
 UNIMODAL_SHADOW_VERSION = "lfpb_pmf_temperature_unimodal_shadow_v1"
 UNIMODAL_SHADOW_TEMPERATURE = 0.67
@@ -58,6 +63,8 @@ UNIMODAL_SHADOW_TEMPERATURE = 0.67
 
 def main() -> None:
     args = _parse_args()
+    issue_time_utc = parse_issue_time(args.issue_time)
+    target_date = date.fromisoformat(args.target_date) if args.target_date else to_local_date(issue_time_utc, TIMEZONE)
     refresh_summary = None
     issue_is_now = args.issue_time in (None, "now")
     if args.auto_refresh and issue_is_now:
@@ -65,15 +72,17 @@ def main() -> None:
         if args.spatial_candidate:
             refresh_summary["spatial_awc"] = _refresh_spatial_awc_live()
         if args.refresh_nwp:
-            refresh_summary["open_meteo_nwp"] = _refresh_open_meteo_live(args.airport, None)
-    issue_time_utc = parse_issue_time(args.issue_time)
-    target_date = date.fromisoformat(args.target_date) if args.target_date else to_local_date(issue_time_utc, TIMEZONE)
+            refresh_summary["open_meteo_nwp"] = _refresh_open_meteo_live(args.airport, target_date)
+            refresh_summary["open_meteo_icon_eu"] = _refresh_open_meteo_icon_eu_live(args.airport, target_date)
+        issue_time_utc = parse_issue_time(args.issue_time)
+        target_date = date.fromisoformat(args.target_date) if args.target_date else to_local_date(issue_time_utc, TIMEZONE)
     if args.auto_refresh and not issue_is_now:
         refresh_summary = {"awc": refresh_awc_live(args.airport)}
         if args.spatial_candidate:
             refresh_summary["spatial_awc"] = _refresh_spatial_awc_live()
         if args.refresh_nwp:
             refresh_summary["open_meteo_nwp"] = _refresh_open_meteo_live(args.airport, target_date)
+            refresh_summary["open_meteo_icon_eu"] = _refresh_open_meteo_icon_eu_live(args.airport, target_date)
     metar = _load_metar(args.airport)
     model = joblib.load(args.model_path)
     metadata = _load_json(args.metadata_path)
@@ -117,6 +126,12 @@ def main() -> None:
         base_feature_row=feature_row,
         champion_distribution=distribution,
     )
+    hf_icon_eu_shadow_candidate = _predict_hf_icon_eu_shadow_candidate(
+        enabled=args.hf_icon_eu_shadow,
+        target_date=target_date,
+        issue_time_utc=issue_time_utc,
+        base_feature_row=feature_row,
+    )
     base_production_distribution = distribution
     base_production_model_version = metadata.get("model_version", "lfpb_metar_tmax_upside_v1")
     production_selection = {
@@ -146,6 +161,7 @@ def main() -> None:
     feature_row["production_expected_tmax_c"] = distribution.expected_tmax_c
     _update_candidate_comparison(spatial_candidate, distribution)
     _update_candidate_comparison(hazard_shadow_candidate, distribution)
+    _update_candidate_comparison(hf_icon_eu_shadow_candidate, distribution)
     forecast_variants = _build_forecast_variants(
         distribution,
         production_model_version=production_model_version,
@@ -153,6 +169,7 @@ def main() -> None:
         unimodal_shadow_candidate=unimodal_shadow_candidate,
         spatial_candidate=spatial_candidate,
         hazard_shadow_candidate=hazard_shadow_candidate,
+        hf_icon_eu_shadow_candidate=hf_icon_eu_shadow_candidate,
     )
     nwp_source_diagnostics = _build_nwp_source_diagnostics(feature_row)
     previous_record = _latest_forecast_record(
@@ -180,6 +197,7 @@ def main() -> None:
                 "nwp_source_diagnostics": nwp_source_diagnostics,
                 "spatial_candidate": spatial_candidate,
                 "hazard_shadow_candidate": hazard_shadow_candidate,
+                "hf_icon_eu_shadow_candidate": hf_icon_eu_shadow_candidate,
                 "forecast_variants": forecast_variants,
                 "unimodal_shadow_candidate": unimodal_shadow_candidate,
             },
@@ -204,6 +222,7 @@ def main() -> None:
         "production_selection": production_selection,
         "spatial_candidate": spatial_candidate,
         "hazard_shadow_candidate": hazard_shadow_candidate,
+        "hf_icon_eu_shadow_candidate": hf_icon_eu_shadow_candidate,
         "forecast_variants": forecast_variants,
         "unimodal_shadow_candidate": unimodal_shadow_candidate,
         "metar_signal": {
@@ -507,6 +526,75 @@ def _predict_hazard_shadow_candidate(
         return {**base, "reason": f"hazard_shadow_unavailable:{exc}"}
 
 
+def _predict_hf_icon_eu_shadow_candidate(
+    *,
+    enabled: bool,
+    target_date: date,
+    issue_time_utc,
+    base_feature_row: dict,
+) -> dict:
+    local_hour = int(pd.Timestamp(issue_time_utc).tz_convert(TIMEZONE).hour)
+    base = {
+        "enabled": bool(enabled),
+        "active": False,
+        "status": "shadow_only_does_not_affect_operational_forecast",
+        "variant": HF_ICON_EU_SHADOW_VARIANT,
+        "local_issue_hour": local_hour,
+        "model_version": None,
+        "reason": None,
+    }
+    if not enabled:
+        return {**base, "reason": "hf_icon_eu_shadow_disabled"}
+    if not HF_ICON_EU_SHADOW_MODEL_PATH.exists():
+        return {**base, "reason": f"missing_model:{HF_ICON_EU_SHADOW_MODEL_PATH}"}
+    try:
+        features = _load_hf_icon_eu_features(target_date, issue_time_utc)
+        if features.get("nwp_missing") or pd.isna(features.get("model_tmax_c")):
+            return {**base, "reason": "missing_live_icon_eu_features"}
+        model = joblib.load(HF_ICON_EU_SHADOW_MODEL_PATH)
+        metadata = _load_json(HF_ICON_EU_SHADOW_METADATA_PATH)
+        feature_row = build_hf_icon_eu_live_feature_row(
+            features,
+            {**base_feature_row, "target_date_local": target_date.isoformat()},
+            issue_time_utc,
+        )
+        distribution = model.predict_distribution(feature_row)
+        return {
+            **base,
+            "active": True,
+            "reason": "active_hf_icon_eu_shadow",
+            "model_version": metadata.get("model_version", getattr(model, "model_version", HF_ICON_EU_SHADOW_VARIANT)),
+            "forecast": distribution.to_payload(),
+            "hf_icon_eu_features": {
+                "source_label": features.get("selected_nwp_source_label"),
+                "source_id": features.get("latest_nwp_source_id"),
+                "model_name": features.get("latest_nwp_model_name"),
+                "model_run_time_utc": _iso_or_none(features.get("model_run_time_utc")),
+                "model_availability_time_utc": _iso_or_none(features.get("model_availability_time_utc")),
+                "max_nwp_knowledge_time_utc": _iso_or_none(features.get("max_nwp_knowledge_time_utc")),
+                "model_run_hour": feature_row.get("model_run_hour"),
+                "model_tmax_c": features.get("model_tmax_c"),
+                "model_future_temp_max_c": features.get("model_future_temp_max_c"),
+                "model_temp_at_08_local": features.get("model_temp_at_08_local"),
+                "model_temp_at_11_local": features.get("model_temp_at_11_local"),
+                "model_temp_at_14_local": features.get("model_temp_at_14_local"),
+                "model_temp_at_17_local": features.get("model_temp_at_17_local"),
+            },
+            "metadata": {
+                "variant_version": metadata.get("model_version", HF_ICON_EU_SHADOW_VARIANT),
+                "status": "shadow_only_does_not_affect_operational_forecast",
+                "training_source": metadata.get("training_source"),
+                "runtime_source_note": metadata.get("runtime_source_note"),
+                "holdout_metrics": metadata.get("holdout_metrics") or {},
+                "included_run_hours": metadata.get("included_run_hours") or [],
+                "unimodal_violation_count": unimodal_violation_count(distribution),
+                "local_issue_hour": local_hour,
+            },
+        }
+    except Exception as exc:
+        return {**base, "reason": f"hf_icon_eu_shadow_unavailable:{exc}"}
+
+
 def _refresh_open_meteo_live(airport: str, target_date_local: date | None) -> dict:
     target = target_date_local or date.today()
     rows = fetch_open_meteo_live_extract(
@@ -520,6 +608,25 @@ def _refresh_open_meteo_live(airport: str, target_date_local: date | None) -> di
         return {"rows_fetched": 0, "archive_rows": _parquet_rows(LIVE_NWP_PATH)}
     NWPArchive(LIVE_NWP_PATH).append_extract(rows)
     return {"rows_fetched": len(rows), "archive_rows": _parquet_rows(LIVE_NWP_PATH)}
+
+
+def _refresh_open_meteo_icon_eu_live(airport: str, target_date_local: date | None) -> dict:
+    target = target_date_local or date.today()
+    try:
+        rows = fetch_open_meteo_live_extract(
+            airport_icao=airport,
+            latitude=LATITUDE,
+            longitude=LONGITUDE,
+            target_date_local=target,
+            timezone_name=TIMEZONE,
+            model_name="icon_eu",
+        )
+        if rows.empty:
+            return {"rows_fetched": 0, "archive_rows": _parquet_rows(LIVE_ICON_EU_NWP_PATH)}
+        NWPArchive(LIVE_ICON_EU_NWP_PATH).append_extract(rows)
+        return {"rows_fetched": len(rows), "archive_rows": _parquet_rows(LIVE_ICON_EU_NWP_PATH)}
+    except Exception as exc:
+        return {"error": str(exc), "archive_rows": _parquet_rows(LIVE_ICON_EU_NWP_PATH)}
 
 
 def _load_nwp_features(target_date_local: date, issue_time_utc) -> dict:
@@ -562,6 +669,19 @@ def _load_nwp_features(target_date_local: date, issue_time_utc) -> dict:
             "nwp_fallback_used": selected["label"] not in {"live_icon_d2", "enhanced_icon_d2", "historical_icon_d2"},
         }
     )
+    return features
+
+
+def _load_hf_icon_eu_features(target_date_local: date, issue_time_utc) -> dict:
+    candidate = _nwp_candidate_from_path("live_icon_eu", LIVE_ICON_EU_NWP_PATH, target_date_local, issue_time_utc)
+    if candidate is None:
+        return {
+            "nwp_missing": True,
+            "model_tmax_c": None,
+            "selected_nwp_source_label": None,
+        }
+    features = dict(candidate["features"])
+    features["selected_nwp_source_label"] = candidate["label"]
     return features
 
 
@@ -697,6 +817,7 @@ def _build_forecast_variants(
     unimodal_shadow_candidate: dict,
     spatial_candidate: dict | None = None,
     hazard_shadow_candidate: dict | None = None,
+    hf_icon_eu_shadow_candidate: dict | None = None,
 ) -> dict:
     local_issue_hour = _clean_optional_float(feature_row.get("local_issue_hour"))
     variants = {
@@ -732,6 +853,13 @@ def _build_forecast_variants(
             "description": "LFPB discrete hazard remaining-upside shadow distribution; diagnostic only.",
             "distribution": hazard.get("forecast") or {},
             "metadata": hazard.get("metadata") or {},
+        }
+    hf_icon_eu = hf_icon_eu_shadow_candidate or {}
+    if hf_icon_eu.get("active") and hf_icon_eu.get("forecast"):
+        variants[HF_ICON_EU_SHADOW_VARIANT] = {
+            "description": "LFPB HF ICON-EU residual PMF shadow distribution; diagnostic only.",
+            "distribution": hf_icon_eu.get("forecast") or {},
+            "metadata": hf_icon_eu.get("metadata") or {},
         }
     return variants
 def _build_unimodal_shadow_candidate(
@@ -969,6 +1097,8 @@ def _format_lfpb_compact_message(payload: dict) -> str:
         "",
         *_format_lfpb_hazard_compact_block(payload, variants, variant_changes.get(HAZARD_SHADOW_VARIANT)),
         "",
+        *_format_lfpb_hf_icon_eu_compact_block(payload, variants, variant_changes.get(HF_ICON_EU_SHADOW_VARIANT)),
+        "",
         *_format_lfpb_short_summary(payload),
     ]
     return "\n".join(line for line in lines if line is not None).strip()
@@ -1045,16 +1175,46 @@ def _format_lfpb_hazard_compact_block(payload: dict, variants: dict, change: dic
     return _format_lfpb_model_block("Discrete hazard shadow", str(model_version), forecast, change, extra)
 
 
+def _format_lfpb_hf_icon_eu_compact_block(payload: dict, variants: dict, change: dict | None) -> list[str]:
+    candidate = payload.get("hf_icon_eu_shadow_candidate") or {}
+    shadow = variants.get(HF_ICON_EU_SHADOW_VARIANT) or {}
+    forecast = candidate.get("forecast") or shadow.get("distribution") or {}
+    if not candidate.get("enabled", False):
+        return ["<b>HF ICON-EU shadow</b>", "Status: no data."]
+    if not candidate.get("active", False) or not forecast.get("probabilities_by_integer_c"):
+        reason = str(candidate.get("reason") or "inactive")
+        return [
+            "<b>HF ICON-EU shadow</b>",
+            f"Model: <code>{candidate.get('model_version') or HF_ICON_EU_SHADOW_VARIANT}</code>",
+            f"Status: inactive ({reason})",
+            *_format_lfpb_model_change_clean(change),
+        ]
+    metadata = candidate.get("metadata") or shadow.get("metadata") or {}
+    model_version = candidate.get("model_version") or metadata.get("variant_version") or HF_ICON_EU_SHADOW_VARIANT
+    comparison = candidate.get("comparison_to_champion") or {}
+    features = candidate.get("hf_icon_eu_features") or {}
+    extra = [
+        f"Shape violations: {metadata.get('unimodal_violation_count', 'n/a')}",
+        f"Expected vs working: {_fmt_delta(comparison.get('expected_tmax_delta_c'))}",
+        f"ICON-EU Tmax: {_fmt_signed_plain(features.get('model_tmax_c'))} °C",
+        f"Run hour: {features.get('model_run_hour', 'n/a')}Z",
+        f"Source: <code>{features.get('source_id') or features.get('source_label') or 'unknown'}</code>",
+    ]
+    return _format_lfpb_model_block("HF ICON-EU shadow", str(model_version), forecast, change, extra)
+
+
 def _format_lfpb_short_summary(payload: dict) -> list[str]:
     forecast = payload.get("forecast") or {}
     wind = ((payload.get("spatial_candidate") or {}).get("forecast") or {})
     hazard = ((payload.get("hazard_shadow_candidate") or {}).get("forecast") or {})
+    hf_icon_eu = ((payload.get("hf_icon_eu_shadow_candidate") or {}).get("forecast") or {})
     signal = payload.get("metar_signal") or {}
     lines = [
         "<b>Кратко</b>",
         f"Рабочий прогноз: {_format_lfpb_bin(forecast.get('most_likely_integer_c'))}",
         f"Wind/advection: {_format_lfpb_bin(wind.get('most_likely_integer_c'))}",
         f"Discrete hazard: {_format_lfpb_bin(hazard.get('most_likely_integer_c'))}",
+        f"HF ICON-EU: {_format_lfpb_bin(hf_icon_eu.get('most_likely_integer_c'))}",
     ]
     if signal.get("latest_metar_temp_c") is not None:
         lines.append(f"Последний METAR: {float(signal.get('latest_metar_temp_c')):.1f} °C")
@@ -1323,6 +1483,12 @@ def _max_timestamp_string(*values) -> str | None:
     return max(stamps).isoformat()
 
 
+def _iso_or_none(value) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    return pd.Timestamp(value).isoformat()
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Predict LFPB daily METAR Tmax distribution.")
     parser.add_argument("--airport", default=AIRPORT)
@@ -1337,6 +1503,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--spatial-candidate", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--promote-spatial-candidate", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--hazard-shadow", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--hf-icon-eu-shadow", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--report-path", default="data/reports/latest_lfpb_metar_tmax_prediction.json")
     return parser.parse_args()
 
