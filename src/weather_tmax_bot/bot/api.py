@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import date
+from numbers import Integral, Real
 from zoneinfo import ZoneInfo
 
+import math
 import os
 
 from fastapi import FastAPI, Header, HTTPException
@@ -34,6 +36,23 @@ from weather_tmax_bot.temporal.freshness_gate import evaluate_freshness_gate
 from weather_tmax_bot.utils.time import parse_issue_time
 
 app = FastAPI(title="Weather Tmax Bot")
+
+
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, Real):
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            return None
+        if isinstance(value, Integral):
+            return int(value)
+        return numeric
+    return value
 
 
 def _require_api_key(x_api_key: str | None = Header(default=None), api_key: str | None = None) -> None:
@@ -84,7 +103,7 @@ def predict(airport: str = "EDDM", target_date: date | None = None, issue_time: 
             "warnings": meta.get("warnings", []),
         }
     )
-    return payload
+    return _json_safe(payload)
 
 
 @app.post("/operational-cycle")
@@ -118,7 +137,7 @@ def operational_cycle(
     )
     if notify:
         summary["telegram_notification"] = notify_if_configured(format_operational_cycle_message(summary))
-    return summary
+    return _json_safe(summary)
 
 
 @app.post("/metar-event-cycle")
@@ -134,13 +153,13 @@ def metar_event_cycle(
     _require_api_key(x_api_key=x_api_key, api_key=api_key)
     issue = parse_issue_time(issue_time)
     target = target_date or issue.astimezone(ZoneInfo("Europe/Berlin")).date()
-    return run_metar_event_cycle(
+    return _json_safe(run_metar_event_cycle(
         airport=airport,
         target_date_local=target,
         issue_time_utc=issue,
         log=log,
         notify=notify,
-    )
+    ))
 
 
 @app.post("/predict-operational")
@@ -175,7 +194,7 @@ def predict_operational(
     )
     payload["timezone"] = "Europe/Berlin"
     payload["data_mode"] = "as_of_knowledge_view"
-    return payload
+    return _json_safe(payload)
 
 
 @app.get("/health")
@@ -197,37 +216,37 @@ def scheduler_healthcheck(
     )
     if should_notify:
         readiness["telegram_notification"] = notify_if_configured(format_healthcheck_message(readiness))
-    return readiness
+    return _json_safe(readiness)
 
 
 @app.get("/model-info")
 def get_model_info():
-    return model_info()
+    return _json_safe(model_info())
 
 
 @app.get("/registry-health")
 def get_registry_health():
-    return registry_health()
+    return _json_safe(registry_health())
 
 
 @app.get("/data-freshness-health")
 def data_freshness_health(fail_on_missing: bool = False, fail_on_stale: bool = True):
-    return evaluate_freshness_gate(fail_on_missing=fail_on_missing, fail_on_stale=fail_on_stale)
+    return _json_safe(evaluate_freshness_gate(fail_on_missing=fail_on_missing, fail_on_stale=fail_on_stale))
 
 
 @app.get("/monitoring-summary")
 def monitoring_summary():
-    return build_monitoring_summary()
+    return _json_safe(build_monitoring_summary())
 
 
 @app.get("/operational-monitoring")
 def operational_monitoring():
-    return operational_monitoring_payload()
+    return _json_safe(operational_monitoring_payload())
 
 
 @app.get("/first-analysis")
 def first_analysis():
-    return build_first_analysis()
+    return _json_safe(build_first_analysis())
 
 
 @app.post("/prepare-operational-run")
@@ -237,17 +256,17 @@ def prepare_operational_run(
     skip_awc: bool = False,
     skip_nwp: bool = False,
 ):
-    return refresh_operational_data(
+    return _json_safe(refresh_operational_data(
         airport=airport,
         target_date_local=target_date,
         refresh_awc=not skip_awc,
         refresh_nwp=not skip_nwp,
-    )
+    ))
 
 
 @app.get("/pending-truth")
 def get_pending_truth(as_of_date: date | None = None, min_lag_days: int = 1):
-    return pending_truth_status(as_of_date=as_of_date, min_lag_days=min_lag_days)
+    return _json_safe(pending_truth_status(as_of_date=as_of_date, min_lag_days=min_lag_days))
 
 
 @app.post("/pending-truth-cron")
@@ -272,7 +291,7 @@ def post_pending_truth_cron(
         readiness = assess_launch_readiness()
         result["scheduler_healthcheck"] = readiness
         result["healthcheck_telegram_notification"] = notify_if_configured(format_healthcheck_message(readiness))
-    return result
+    return _json_safe(result)
 
 
 @app.post("/daily-report")
@@ -287,11 +306,11 @@ def post_daily_report(
     x_api_key: str | None = Header(default=None),
 ):
     _require_api_key(x_api_key=x_api_key, api_key=api_key)
-    return run_daily_model_report(
+    return _json_safe(run_daily_model_report(
         airport=airport,
         target_date_local=target_date,
         mode=mode,
         notify=notify,
         force=force,
         earliest_local_hour=earliest_local_hour if mode == "preliminary_metar" else None,
-    )
+    ))
