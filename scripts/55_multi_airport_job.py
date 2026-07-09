@@ -34,6 +34,15 @@ def main() -> None:
                     args.issue_time,
                 ],
             ),
+            _run_step(
+                "EHAM forecast",
+                [
+                    sys.executable,
+                    "scripts/106_eham_forecast_job.py",
+                    "--issue-time",
+                    args.issue_time,
+                ],
+            ),
         ]
     elif args.job == "metar-event-all-once":
         results = [
@@ -58,6 +67,17 @@ def main() -> None:
                 [
                     sys.executable,
                     "scripts/54_lfpb_metar_event_job.py",
+                    "--issue-time",
+                    args.issue_time,
+                    "--poll-timeout-seconds",
+                    "0",
+                ],
+            ),
+            _run_step(
+                "EHAM METAR once",
+                [
+                    sys.executable,
+                    "scripts/107_eham_metar_event_job.py",
                     "--issue-time",
                     args.issue_time,
                     "--poll-timeout-seconds",

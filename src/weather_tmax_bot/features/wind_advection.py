@@ -10,6 +10,7 @@ from weather_tmax_bot.utils.time import local_day_bounds_utc
 
 DEFAULT_ADVECTION_STATIONS = ["LFPB", "LFPG", "LFPO"]
 EDDM_ADVECTION_STATIONS = ["EDDM", "EDMO", "EDMA", "ETSI", "ETSL"]
+EHAM_ADVECTION_STATIONS = ["EHAM", "EHRD", "EHLE", "EHKD"]
 
 
 def wind_advection_feature_columns(

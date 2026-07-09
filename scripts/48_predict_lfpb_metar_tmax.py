@@ -186,7 +186,11 @@ def main() -> None:
             distribution=distribution,
             feature_snapshot={
                 **feature_row,
-                "data_sources_used": ["awc.metar.live.LFPB", "iem.metar.archive.LFPB", feature_row.get("latest_nwp_source_id")],
+                "data_sources_used": [
+                    f"awc.metar.live.{args.airport}",
+                    f"iem.metar.archive.{args.airport}",
+                    feature_row.get("latest_nwp_source_id"),
+                ],
                 "target": "METAR_Tmax",
                 "model_family": "metar_tmax_remaining_upside",
                 "intraday_survival_layer": survival_adjustment.details,
@@ -344,13 +348,14 @@ def _predict_spatial_candidate(
             timezone_name=TIMEZONE,
             stations=DEFAULT_SPATIAL_STATIONS,
         )
-        station_metars = {"LFPB": _load_metar("LFPB"), **neighbor_metars}
+        station_metars = {AIRPORT: _load_metar(AIRPORT), **neighbor_metars}
         advection_features = build_wind_advection_features(
             station_metars,
             target_date_local=target_date,
             issue_time_utc=issue_time_utc,
             timezone_name=TIMEZONE,
             stations=DEFAULT_ADVECTION_STATIONS,
+            target_station=AIRPORT,
         )
         spatial_row = {**base_feature_row, **spatial_features, **advection_features}
         if not spatial_features.get("spatial_leakage_check_passed", False):
@@ -472,13 +477,14 @@ def _predict_hazard_shadow_candidate(
             timezone_name=TIMEZONE,
             stations=DEFAULT_SPATIAL_STATIONS,
         )
-        station_metars = {"LFPB": _load_metar("LFPB"), **neighbor_metars}
+        station_metars = {AIRPORT: _load_metar(AIRPORT), **neighbor_metars}
         advection_features = build_wind_advection_features(
             station_metars,
             target_date_local=target_date,
             issue_time_utc=issue_time_utc,
             timezone_name=TIMEZONE,
             stations=DEFAULT_ADVECTION_STATIONS,
+            target_station=AIRPORT,
         )
         if not spatial_features.get("spatial_leakage_check_passed", False):
             return {**base, "reason": "hazard_shadow_spatial_leakage_check_failed"}
@@ -822,7 +828,7 @@ def _build_forecast_variants(
     local_issue_hour = _clean_optional_float(feature_row.get("local_issue_hour"))
     variants = {
         "production_champion": {
-            "description": "Operational LFPB METAR Tmax distribution sent to users.",
+            "description": f"Operational {AIRPORT} METAR Tmax distribution sent to users.",
             "distribution": distribution.to_payload(),
             "metadata": {
                 "variant_version": production_model_version,
@@ -839,7 +845,7 @@ def _build_forecast_variants(
     candidate = spatial_candidate or {}
     if candidate.get("active") and candidate.get("forecast"):
         variants["shadow_spatial_wind_advection"] = {
-            "description": "LFPB spatial + wind/advection candidate distribution.",
+            "description": f"{AIRPORT} spatial + wind/advection candidate distribution.",
             "distribution": candidate.get("forecast") or {},
             "metadata": {
                 "variant_version": candidate.get("model_version"),
@@ -850,14 +856,14 @@ def _build_forecast_variants(
     hazard = hazard_shadow_candidate or {}
     if hazard.get("active") and hazard.get("forecast"):
         variants[HAZARD_SHADOW_VARIANT] = {
-            "description": "LFPB discrete hazard remaining-upside shadow distribution; diagnostic only.",
+            "description": f"{AIRPORT} discrete hazard remaining-upside shadow distribution; diagnostic only.",
             "distribution": hazard.get("forecast") or {},
             "metadata": hazard.get("metadata") or {},
         }
     hf_icon_eu = hf_icon_eu_shadow_candidate or {}
     if hf_icon_eu.get("active") and hf_icon_eu.get("forecast"):
         variants[HF_ICON_EU_SHADOW_VARIANT] = {
-            "description": "LFPB HF ICON-EU residual PMF shadow distribution; diagnostic only.",
+            "description": f"{AIRPORT} HF ICON-EU residual PMF shadow distribution; diagnostic only.",
             "distribution": hf_icon_eu.get("forecast") or {},
             "metadata": hf_icon_eu.get("metadata") or {},
         }

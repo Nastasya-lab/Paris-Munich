@@ -211,6 +211,69 @@
         "mode_error_ge_2c_rate": 0.13725490196078433,
         "mean_shape_violations": 0.0
       }
+    },
+    {
+      "version": "eham_metar_tmax_icon_d2_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\eham_metar_tmax_icon_d2_v1.joblib",
+      "metadata_path": "data\\models\\eham_metar_tmax_icon_d2_v1.metadata.json",
+      "metrics": {
+        "model_variant": "eham_icon_d2_ensemble_candidate",
+        "rows": 64,
+        "distinct_days": 8,
+        "mae_expected": 0.7034707965,
+        "rmse_expected": 0.8805698687,
+        "bias_expected": 0.0578929985,
+        "mean_nll": 1.1395577421,
+        "mean_crps": 0.0286465079,
+        "brier_upside_ge_1c": 0.0832694655,
+        "brier_upside_ge_2c": 0.1020679972,
+        "brier_upside_ge_3c": 0.0587934915,
+        "coverage_80": 0.90625
+      }
+    },
+    {
+      "version": "eham_metar_tmax_icon_d2_spatial_wind_advection_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\eham_metar_tmax_icon_d2_spatial_wind_advection_v1.joblib",
+      "metadata_path": "data\\models\\eham_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json",
+      "metrics": {
+        "model_variant": "spatial_wind_advection_icon_d2",
+        "rows": 64,
+        "distinct_days": 8,
+        "mae_expected": 0.702398358925139,
+        "rmse_expected": 0.8714263483311325,
+        "bias_expected": 0.05000015662872154,
+        "mean_nll": 1.1276962913665876,
+        "mean_crps": 0.028464068323122156,
+        "brier_upside_ge_1c": 0.08184851258480436,
+        "brier_upside_ge_2c": 0.09964698423281745,
+        "brier_upside_ge_3c": 0.06466060648447383,
+        "coverage_80": 0.90625
+      }
+    },
+    {
+      "version": "eham_discrete_hazard_spatial_wind_advection_shadow_v1",
+      "artifact_type": "model",
+      "path": "data\\models\\eham_discrete_hazard_spatial_wind_advection_shadow_v1.joblib",
+      "metadata_path": "data\\models\\eham_discrete_hazard_spatial_wind_advection_shadow_v1.metadata.json",
+      "metrics": {
+        "model_variant": "eham_discrete_hazard_spatial_wind_advection_shadow_v1",
+        "rows": 64,
+        "distinct_days": 8,
+        "mae_expected": 0.7027477277588434,
+        "rmse_expected": 0.8981410751631959,
+        "bias_expected": 0.04018552578141832,
+        "mean_nll": 1.085997312258286,
+        "mean_crps": 0.02919739787327806,
+        "brier_upside_ge_1c": 0.08184851258480436,
+        "brier_upside_ge_2c": 0.1058843795647604,
+        "brier_upside_ge_3c": 0.060132307940178306,
+        "coverage_80": 0.953125,
+        "mode_hit_rate": 0.625,
+        "mode_error_ge_2c_rate": 0.171875,
+        "mean_shape_violations": 0.59375
+      }
     }
   ],
   "promotion": {

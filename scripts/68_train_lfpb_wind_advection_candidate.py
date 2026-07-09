@@ -82,6 +82,12 @@ NWP_COLUMNS = [
 
 def main() -> None:
     args = _parse_args()
+    airport = args.airport.upper()
+    model_version = args.model_version or MODEL_VERSION
+    if args.neighbor_station is None:
+        args.neighbor_station = list(DEFAULT_SPATIAL_STATIONS)
+    if args.advection_station is None:
+        args.advection_station = list(DEFAULT_ADVECTION_STATIONS)
     dataset = _load_or_build_dataset(args)
     frame = prepare_metar_tmax_dataset(dataset)
     frame["target_date_local"] = pd.to_datetime(frame["target_date_local"], errors="coerce").dt.date
@@ -93,7 +99,7 @@ def main() -> None:
         + list(ENHANCED_INTRADAY_FEATURES)
         + list(NWP_COLUMNS)
         + spatial_feature_columns(args.neighbor_station)
-        + wind_advection_feature_columns(args.advection_station)
+        + wind_advection_feature_columns(args.advection_station, target_station=airport)
     )
 
     model = MetarTmaxUpsideModel(min_rows=args.min_train_rows, max_iter=args.max_iter, feature_columns=features).fit(train)
@@ -106,7 +112,7 @@ def main() -> None:
         ml_model=model,
         residuals_by_hour=residuals,
         ml_weight=ml_weight,
-        model_version=MODEL_VERSION,
+        model_version=model_version,
     )
     scored = _score_holdout(test, ensemble)
     summary = _summary(scored, ["model_variant"])
@@ -114,22 +120,22 @@ def main() -> None:
 
     model_dir = Path(args.model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
-    model_path = model_dir / f"{MODEL_VERSION}.joblib"
-    metadata_path = model_dir / f"{MODEL_VERSION}.metadata.json"
+    model_path = model_dir / f"{model_version}.joblib"
+    metadata_path = model_dir / f"{model_version}.metadata.json"
     joblib.dump(ensemble, model_path)
     metadata = {
-        "model_name": "lfpb_spatial_wind_advection_icon_d2_candidate",
-        "model_version": MODEL_VERSION,
-        "airport": "LFPB",
+        "model_name": f"{airport.lower()}_spatial_wind_advection_icon_d2_candidate",
+        "model_version": model_version,
+        "airport": airport,
         "target": "daily maximum temperature reported by METAR",
         "role": "production_parallel_candidate",
         "active_local_hour_window": [12, 18],
         "neighbor_stations": list(args.neighbor_station),
         "advection_stations": list(args.advection_station),
-        "feature_set_version": "lfpb.metar_tmax.icon_d2.spatial_wind_advection.v1",
+        "feature_set_version": f"{airport.lower()}.metar_tmax.icon_d2.spatial_wind_advection.v1",
         "feature_columns": features,
         "spatial_feature_columns": spatial_feature_columns(args.neighbor_station),
-        "wind_advection_feature_columns": wind_advection_feature_columns(args.advection_station),
+        "wind_advection_feature_columns": wind_advection_feature_columns(args.advection_station, target_station=airport),
         "usable_rows": len(frame),
         "days_joined": int(frame["target_date_local"].nunique()),
         "target_period": [str(frame["target_date_local"].min()), str(frame["target_date_local"].max())],
@@ -156,7 +162,7 @@ def main() -> None:
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
     register_artifact(
-        version=MODEL_VERSION,
+        version=model_version,
         artifact_type="model",
         path=model_path,
         metadata_path=metadata_path,
@@ -165,9 +171,10 @@ def main() -> None:
     )
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
-    scored.to_parquet(report_dir / "lfpb_wind_advection_candidate_holdout_rows.parquet", index=False)
-    summary.to_csv(report_dir / "lfpb_wind_advection_candidate_holdout_summary.csv", index=False)
-    (report_dir / "lfpb_wind_advection_candidate_training.json").write_text(
+    prefix = airport.lower()
+    scored.to_parquet(report_dir / f"{prefix}_wind_advection_candidate_holdout_rows.parquet", index=False)
+    summary.to_csv(report_dir / f"{prefix}_wind_advection_candidate_holdout_summary.csv", index=False)
+    (report_dir / f"{prefix}_wind_advection_candidate_training.json").write_text(
         json.dumps(metadata, indent=2, default=str),
         encoding="utf-8",
     )
@@ -189,7 +196,13 @@ def _load_or_build_dataset(args: argparse.Namespace) -> pd.DataFrame:
         station: pd.read_parquet(Path(args.neighbor_dir) / f"metar_iem_{station}.parquet")
         for station in args.advection_station
     }
-    out = add_wind_advection_features_to_frame(base, station_metars, timezone_name=args.timezone, stations=args.advection_station)
+    out = add_wind_advection_features_to_frame(
+        base,
+        station_metars,
+        timezone_name=args.timezone,
+        stations=args.advection_station,
+        target_station=args.airport,
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(output, index=False)
     return out
@@ -344,11 +357,13 @@ def _season(value) -> str:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train LFPB spatial + wind/advection candidate.")
+    parser.add_argument("--airport", default="LFPB")
+    parser.add_argument("--model-version", default=MODEL_VERSION)
     parser.add_argument("--dataset", default="data/processed/metar_upside_dataset_LFPB_icon_d2_spatial.parquet")
     parser.add_argument("--output-dataset", default="data/processed/metar_upside_dataset_LFPB_icon_d2_spatial_advection.parquet")
     parser.add_argument("--neighbor-dir", default="data/interim")
-    parser.add_argument("--neighbor-station", action="append", default=list(DEFAULT_SPATIAL_STATIONS))
-    parser.add_argument("--advection-station", action="append", default=list(DEFAULT_ADVECTION_STATIONS))
+    parser.add_argument("--neighbor-station", action="append", default=None)
+    parser.add_argument("--advection-station", action="append", default=None)
     parser.add_argument("--timezone", default="Europe/Paris")
     parser.add_argument("--model-dir", default="data/models")
     parser.add_argument("--report-dir", default="data/reports")

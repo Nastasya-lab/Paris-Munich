@@ -26,6 +26,8 @@ MODEL_VERSION = "lfpb_discrete_hazard_spatial_wind_advection_shadow_v1"
 
 def main() -> None:
     args = _parse_args()
+    airport = args.airport.upper()
+    model_version = args.model_version or MODEL_VERSION
     dataset = pd.read_parquet(args.dataset)
     frame = prepare_metar_tmax_dataset(dataset)
     frame["target_date_local"] = pd.to_datetime(frame["target_date_local"], errors="coerce").dt.date
@@ -46,26 +48,26 @@ def main() -> None:
         ml_model=model,
         residuals_by_hour=residuals,
         ml_weight=args.ml_weight,
-        model_version=MODEL_VERSION,
+        model_version=model_version,
     )
-    scored = _score_holdout(test, ensemble)
+    scored = _score_holdout(test, ensemble, model_version=model_version)
     summary = _summary(scored, ["model_variant"])
     by_hour = _summary(scored, ["model_variant", "local_issue_hour"])
     metrics = summary.iloc[0].to_dict()
 
     model_dir = Path(args.model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
-    model_path = model_dir / f"{MODEL_VERSION}.joblib"
-    metadata_path = model_dir / f"{MODEL_VERSION}.metadata.json"
+    model_path = model_dir / f"{model_version}.joblib"
+    metadata_path = model_dir / f"{model_version}.metadata.json"
     joblib.dump(ensemble, model_path)
 
     metadata = {
-        "model_name": "lfpb_discrete_hazard_spatial_wind_advection_shadow",
-        "model_version": MODEL_VERSION,
-        "airport": "LFPB",
+        "model_name": f"{airport.lower()}_discrete_hazard_spatial_wind_advection_shadow",
+        "model_version": model_version,
+        "airport": airport,
         "target": "daily maximum temperature reported by METAR",
         "role": "shadow_diagnostic",
-        "feature_set_version": "lfpb.metar_tmax.icon_d2.spatial_wind_advection.discrete_hazard.v1",
+        "feature_set_version": f"{airport.lower()}.metar_tmax.icon_d2.spatial_wind_advection.discrete_hazard.v1",
         "feature_columns": feature_columns,
         "usable_rows": len(frame),
         "days_joined": int(frame["target_date_local"].nunique()),
@@ -88,7 +90,7 @@ def main() -> None:
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
     register_artifact(
-        version=MODEL_VERSION,
+        version=model_version,
         artifact_type="model",
         path=model_path,
         metadata_path=metadata_path,
@@ -98,10 +100,11 @@ def main() -> None:
 
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
-    scored.to_parquet(report_dir / "lfpb_discrete_hazard_shadow_holdout_rows.parquet", index=False)
-    summary.to_csv(report_dir / "lfpb_discrete_hazard_shadow_holdout_summary.csv", index=False)
-    by_hour.to_csv(report_dir / "lfpb_discrete_hazard_shadow_holdout_by_hour.csv", index=False)
-    (report_dir / "lfpb_discrete_hazard_shadow_training.json").write_text(
+    prefix = airport.lower()
+    scored.to_parquet(report_dir / f"{prefix}_discrete_hazard_shadow_holdout_rows.parquet", index=False)
+    summary.to_csv(report_dir / f"{prefix}_discrete_hazard_shadow_holdout_summary.csv", index=False)
+    by_hour.to_csv(report_dir / f"{prefix}_discrete_hazard_shadow_holdout_by_hour.csv", index=False)
+    (report_dir / f"{prefix}_discrete_hazard_shadow_training.json").write_text(
         json.dumps(metadata, indent=2, default=str),
         encoding="utf-8",
     )
@@ -148,10 +151,10 @@ def _residual_samples_by_hour(frame: pd.DataFrame) -> dict[int, np.ndarray]:
     return residuals
 
 
-def _score_holdout(test: pd.DataFrame, ensemble: IconD2MetarTmaxEnsemble) -> pd.DataFrame:
+def _score_holdout(test: pd.DataFrame, ensemble: IconD2MetarTmaxEnsemble, *, model_version: str = MODEL_VERSION) -> pd.DataFrame:
     rows = []
     for _, row in test.iterrows():
-        rows.append(_score(MODEL_VERSION, row, ensemble.predict_distribution(row)))
+        rows.append(_score(model_version, row, ensemble.predict_distribution(row)))
     return pd.DataFrame(rows)
 
 
@@ -215,6 +218,8 @@ def _covered(dist: TmaxDistribution, actual: float, mass: float) -> bool:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train LFPB discrete hazard shadow model.")
+    parser.add_argument("--airport", default="LFPB")
+    parser.add_argument("--model-version", default=MODEL_VERSION)
     parser.add_argument("--dataset", default="data/processed/metar_upside_dataset_LFPB_icon_d2_spatial_advection.parquet")
     parser.add_argument("--feature-metadata", default="data/models/lfpb_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json")
     parser.add_argument("--model-dir", default="data/models")

@@ -35,3 +35,17 @@ airports:
       date_to: '2026-06-04'
       source_id: meteofrance.base.hourly.air_temperature.95088001
       fallback_source_id: meteofrance.base.daily.air_temperature.95088001
+  EHAM:
+    name: Amsterdam Schiphol Airport
+    timezone: Europe/Amsterdam
+    latitude: 52.3086
+    longitude: 4.7639
+    elevation_m: -3
+    truth_station:
+      provider: METAR
+      station_id: EHAM
+      station_name: Amsterdam Schiphol
+      latitude: 52.3086
+      longitude: 4.7639
+      elevation_m: -3
+      source_id: iem.metar.archive.EHAM

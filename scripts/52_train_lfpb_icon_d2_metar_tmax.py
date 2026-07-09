@@ -78,6 +78,8 @@ NWP_COLUMNS = [
 
 def main() -> None:
     args = _parse_args()
+    model_version = args.model_version or MODEL_VERSION
+    airport = args.airport.upper()
     dataset = pd.read_parquet(args.metar_dataset)
     nwp = pd.read_parquet(args.nwp_archive)
     joined = _join_asof_nwp(dataset, nwp)
@@ -134,7 +136,7 @@ def main() -> None:
         ml_model=icon_model,
         residuals_by_hour=residuals,
         ml_weight=ml_weight,
-        model_version=MODEL_VERSION,
+        model_version=model_version,
     )
     scored = _score_holdout(
         test=test,
@@ -142,26 +144,27 @@ def main() -> None:
         icon_ensemble=ensemble,
         metar_model=metar_model,
         residuals=residuals,
+        variant_prefix=airport.lower(),
     )
     summary = _group_summary(scored, ["model_variant"])
     by_hour = _group_summary(scored, ["model_variant", "local_issue_hour"])
     by_season = _group_summary(scored, ["model_variant", "season"])
-    candidate_metrics = _metrics_for(summary, "lfpb_icon_d2_ensemble_candidate")
+    candidate_metrics = _metrics_for(summary, f"{airport.lower()}_icon_d2_ensemble_candidate")
 
     model_dir = Path(args.model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
-    model_path = model_dir / f"{MODEL_VERSION}.joblib"
-    metadata_path = model_dir / f"{MODEL_VERSION}.metadata.json"
+    model_path = model_dir / f"{model_version}.joblib"
+    metadata_path = model_dir / f"{model_version}.metadata.json"
     joblib.dump(ensemble, model_path)
 
     metadata = {
-        "model_name": "lfpb_icon_d2_metar_tmax_remaining_upside",
-        "model_version": MODEL_VERSION,
-        "airport": "LFPB",
+        "model_name": f"{airport.lower()}_icon_d2_metar_tmax_remaining_upside",
+        "model_version": model_version,
+        "airport": airport,
         "target": "daily maximum temperature reported by METAR",
         "training_source": "IEM METAR historical observations + Open-Meteo forecast-as-issued ICON-D2 single runs",
-        "feature_set_version": "lfpb.metar_tmax.icon_d2.intraday_enhanced.v2",
-        "source_registry_version": "2026-06-10.lfpb.icon_d2.intraday_enhanced",
+        "feature_set_version": f"{airport.lower()}.metar_tmax.icon_d2.intraday_enhanced.v2",
+        "source_registry_version": f"2026-06-10.{airport.lower()}.icon_d2.intraday_enhanced",
         "feature_columns": feature_columns,
         "enhanced_intraday_feature_columns": ENHANCED_INTRADAY_FEATURES,
         "rows_joined": len(joined),
@@ -195,7 +198,7 @@ def main() -> None:
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
     register_artifact(
-        version=MODEL_VERSION,
+        version=model_version,
         artifact_type="model",
         path=model_path,
         metadata_path=metadata_path,
@@ -205,15 +208,16 @@ def main() -> None:
 
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
-    scored.to_parquet(report_dir / "lfpb_icon_d2_metar_tmax_holdout_rows.parquet", index=False)
-    summary.to_csv(report_dir / "lfpb_icon_d2_metar_tmax_holdout_summary.csv", index=False)
-    by_hour.to_csv(report_dir / "lfpb_icon_d2_metar_tmax_holdout_by_hour.csv", index=False)
-    by_season.to_csv(report_dir / "lfpb_icon_d2_metar_tmax_holdout_by_season.csv", index=False)
-    (report_dir / "lfpb_icon_d2_metar_tmax_training.json").write_text(
+    prefix = airport.lower()
+    scored.to_parquet(report_dir / f"{prefix}_icon_d2_metar_tmax_holdout_rows.parquet", index=False)
+    summary.to_csv(report_dir / f"{prefix}_icon_d2_metar_tmax_holdout_summary.csv", index=False)
+    by_hour.to_csv(report_dir / f"{prefix}_icon_d2_metar_tmax_holdout_by_hour.csv", index=False)
+    by_season.to_csv(report_dir / f"{prefix}_icon_d2_metar_tmax_holdout_by_season.csv", index=False)
+    (report_dir / f"{prefix}_icon_d2_metar_tmax_training.json").write_text(
         json.dumps(metadata, indent=2, default=str),
         encoding="utf-8",
     )
-    Path("docs/lfpb_icon_d2_metar_tmax_model.md").write_text(
+    Path(args.doc_path).write_text(
         _markdown(metadata, summary, by_hour, by_season),
         encoding="utf-8",
     )
@@ -342,12 +346,13 @@ def _score_holdout(
     icon_ensemble: IconD2MetarTmaxEnsemble,
     metar_model: MetarTmaxUpsideModel,
     residuals: dict[int, np.ndarray],
+    variant_prefix: str = "lfpb",
 ) -> pd.DataFrame:
     rows = []
     for _, row in test.iterrows():
-        rows.append(_score("lfpb_icon_d2_ensemble_candidate", row, icon_ensemble.predict_distribution(row)))
-        rows.append(_score("lfpb_icon_d2_ml_calibrated", row, icon_model.predict_distribution(row)))
-        rows.append(_score("lfpb_metar_only_calibrated", row, metar_model.predict_distribution(row)))
+        rows.append(_score(f"{variant_prefix}_icon_d2_ensemble_candidate", row, icon_ensemble.predict_distribution(row)))
+        rows.append(_score(f"{variant_prefix}_icon_d2_ml_calibrated", row, icon_model.predict_distribution(row)))
+        rows.append(_score(f"{variant_prefix}_metar_only_calibrated", row, metar_model.predict_distribution(row)))
         rows.append(_score("raw_icon_d2_residual_distribution", row, _raw_icon_residual_distribution(row, residuals)))
         rows.append(
             _score(
@@ -530,6 +535,8 @@ def _format_cell(value) -> str:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train LFPB ICON-D2-aware METAR Tmax model.")
+    parser.add_argument("--airport", default="LFPB")
+    parser.add_argument("--model-version", default=MODEL_VERSION)
     parser.add_argument("--metar-dataset", default="data/processed/metar_upside_dataset_LFPB_intraday_enhanced.parquet")
     parser.add_argument("--nwp-archive", default="data/forecasts/open_meteo_single_runs_icon_d2_LFPB.parquet")
     parser.add_argument("--output-dataset", default="data/processed/metar_upside_dataset_LFPB_icon_d2.parquet")
@@ -539,6 +546,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--min-calibration-rows", type=int, default=300)
     parser.add_argument("--min-test-rows", type=int, default=300)
     parser.add_argument("--max-iter", type=int, default=60)
+    parser.add_argument("--doc-path", default="docs/lfpb_icon_d2_metar_tmax_model.md")
     return parser.parse_args()
 
 
