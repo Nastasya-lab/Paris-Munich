@@ -100,6 +100,9 @@ def main() -> None:
 
 def _run_step(label: str, command: list[str]) -> dict:
     env = os.environ.copy()
+    if not env.get("MUNICH_API_BASE_URL"):
+        port = env.get("PORT", "8000")
+        env["MUNICH_API_BASE_URL"] = f"http://127.0.0.1:{port}"
     started = datetime.now(ZoneInfo("UTC")).isoformat()
     try:
         completed = subprocess.run(
