@@ -39,55 +39,47 @@ class PaperTradingConfig:
     request_timeout_seconds: float
 
     @classmethod
-    def from_env(cls) -> "PaperTradingConfig":
+    def from_env(cls, prefix: str = "LFPB") -> "PaperTradingConfig":
+        normalized_prefix = prefix.strip().upper()
+
+        def value(name: str, default: str) -> str:
+            return os.getenv(f"{normalized_prefix}_POLYMARKET_{name}", default)
+
+        def enabled(name: str, default: bool) -> bool:
+            return _env_bool(f"{normalized_prefix}_POLYMARKET_{name}", default)
+
         return cls(
-            enabled=_env_bool("LFPB_POLYMARKET_PAPER_ENABLED", True),
-            signal_variant=os.getenv("LFPB_POLYMARKET_SIGNAL_VARIANT", "production_champion"),
+            enabled=enabled("PAPER_ENABLED", True),
+            signal_variant=value("SIGNAL_VARIANT", "production_champion"),
             state_path=Path(
-                os.getenv(
-                    "LFPB_POLYMARKET_STATE_PATH",
-                    "data/polymarket/lfpb_paper_state.json",
-                )
+                value("STATE_PATH", f"data/polymarket/{normalized_prefix.lower()}_paper_state.json")
             ),
             decision_log_path=Path(
-                os.getenv(
-                    "LFPB_POLYMARKET_DECISION_LOG_PATH",
-                    "data/polymarket/lfpb_paper_decisions.jsonl",
+                value(
+                    "DECISION_LOG_PATH",
+                    f"data/polymarket/{normalized_prefix.lower()}_paper_decisions.jsonl",
                 )
             ),
-            start_balance_usd=float(os.getenv("LFPB_POLYMARKET_START_BALANCE_USD", "1000")),
-            calibration_buffer=float(os.getenv("LFPB_POLYMARKET_CALIBRATION_BUFFER", "0.05")),
-            cost_buffer=float(os.getenv("LFPB_POLYMARKET_COST_BUFFER", "0.01")),
-            min_effective_edge=float(os.getenv("LFPB_POLYMARKET_MIN_EFFECTIVE_EDGE", "0.08")),
-            close_effective_edge=float(os.getenv("LFPB_POLYMARKET_CLOSE_EFFECTIVE_EDGE", "0.02")),
-            max_position_fraction=float(os.getenv("LFPB_POLYMARKET_MAX_POSITION_PCT", "0.01")),
-            max_daily_exposure_fraction=float(
-                os.getenv("LFPB_POLYMARKET_MAX_DAILY_EXPOSURE_PCT", "0.02")
-            ),
-            max_positions=int(os.getenv("LFPB_POLYMARKET_MAX_POSITIONS", "5")),
-            min_contract_price=float(os.getenv("LFPB_POLYMARKET_MIN_CONTRACT_PRICE", "0.02")),
-            max_contract_price=float(os.getenv("LFPB_POLYMARKET_MAX_CONTRACT_PRICE", "0.95")),
-            min_fill_ratio=float(os.getenv("LFPB_POLYMARKET_MIN_FILL_RATIO", "0.98")),
-            allow_yes_positions=_env_bool("LFPB_POLYMARKET_ALLOW_YES", False),
+            start_balance_usd=float(value("START_BALANCE_USD", "1000")),
+            calibration_buffer=float(value("CALIBRATION_BUFFER", "0.05")),
+            cost_buffer=float(value("COST_BUFFER", "0.01")),
+            min_effective_edge=float(value("MIN_EFFECTIVE_EDGE", "0.08")),
+            close_effective_edge=float(value("CLOSE_EFFECTIVE_EDGE", "0.02")),
+            max_position_fraction=float(value("MAX_POSITION_PCT", "0.01")),
+            max_daily_exposure_fraction=float(value("MAX_DAILY_EXPOSURE_PCT", "0.02")),
+            max_positions=int(value("MAX_POSITIONS", "5")),
+            min_contract_price=float(value("MIN_CONTRACT_PRICE", "0.02")),
+            max_contract_price=float(value("MAX_CONTRACT_PRICE", "0.95")),
+            min_fill_ratio=float(value("MIN_FILL_RATIO", "0.98")),
+            allow_yes_positions=enabled("ALLOW_YES", False),
             signal_confirmations_required=max(
                 1,
-                int(os.getenv("LFPB_POLYMARKET_SIGNAL_CONFIRMATIONS_REQUIRED", "2")),
+                int(value("SIGNAL_CONFIRMATIONS_REQUIRED", "2")),
             ),
-            local_hour_start=int(os.getenv("LFPB_POLYMARKET_LOCAL_HOUR_START", "10")),
-            local_hour_end=int(os.getenv("LFPB_POLYMARKET_LOCAL_HOUR_END", "17")),
-            require_verified_settlement=_env_bool(
-                "LFPB_POLYMARKET_REQUIRE_VERIFIED_SETTLEMENT",
-                False,
-            ),
-            gamma_api_url=os.getenv(
-                "LFPB_POLYMARKET_GAMMA_URL",
-                "https://gamma-api.polymarket.com",
-            ),
-            clob_api_url=os.getenv(
-                "LFPB_POLYMARKET_CLOB_URL",
-                "https://clob.polymarket.com",
-            ),
-            request_timeout_seconds=float(
-                os.getenv("LFPB_POLYMARKET_REQUEST_TIMEOUT_SECONDS", "15")
-            ),
+            local_hour_start=int(value("LOCAL_HOUR_START", "10")),
+            local_hour_end=int(value("LOCAL_HOUR_END", "17")),
+            require_verified_settlement=enabled("REQUIRE_VERIFIED_SETTLEMENT", False),
+            gamma_api_url=value("GAMMA_URL", "https://gamma-api.polymarket.com"),
+            clob_api_url=value("CLOB_URL", "https://clob.polymarket.com"),
+            request_timeout_seconds=float(value("REQUEST_TIMEOUT_SECONDS", "15")),
         )

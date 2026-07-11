@@ -39,6 +39,31 @@ def main() -> None:
     if not args.log:
         command.append("--no-log")
     subprocess.run(command, check=True)
+    _run_polymarket_paper()
+
+
+def _run_polymarket_paper() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/83_lfpb_polymarket_paper_job.py",
+            "--airport",
+            "EHAM",
+            "--notify",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if completed.stdout:
+        print(f"\n===== EHAM Polymarket paper stdout =====\n{completed.stdout}")
+    if completed.stderr:
+        print(f"\n===== EHAM Polymarket paper stderr =====\n{completed.stderr}", file=sys.stderr)
+    if completed.returncode != 0:
+        print(
+            "EHAM Polymarket paper job failed; the weather forecast remains successful.",
+            file=sys.stderr,
+        )
 
 
 def _activate_eham_telegram() -> None:

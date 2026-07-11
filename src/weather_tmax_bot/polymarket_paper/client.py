@@ -24,7 +24,13 @@ class PolymarketPublicClient:
         self.config = config
         self.session = session or requests.Session()
 
-    def fetch_paris_market(self, target_date_local: date) -> MarketSnapshot:
+    def fetch_temperature_market(
+        self,
+        target_date_local: date,
+        *,
+        city_name: str,
+        station_markers: tuple[str, ...] = (),
+    ) -> MarketSnapshot:
         response = self.session.get(
             f"{self.config.gamma_api_url}/events",
             params={
@@ -38,17 +44,21 @@ class PolymarketPublicClient:
         )
         response.raise_for_status()
         events = response.json()
-        event = self._select_event(events, target_date_local)
+        event = self._select_event(events, target_date_local, city_name=city_name)
         markets = [
             market
             for raw_market in event.get("markets") or []
             if (market := self._parse_market(raw_market)) is not None
         ]
         if not markets:
-            raise RuntimeError("Paris weather event has no parseable temperature markets")
+            raise RuntimeError(f"{city_name} weather event has no parseable temperature markets")
         self._hydrate_books(markets)
         settlement_text = self._settlement_text(event)
-        verified, notes = validate_settlement_text(settlement_text)
+        verified, notes = validate_settlement_text(
+            settlement_text,
+            city_name=city_name,
+            station_markers=station_markers,
+        )
         return MarketSnapshot(
             event_title=str(event.get("title") or ""),
             event_slug=str(event.get("slug") or ""),
@@ -57,6 +67,14 @@ class PolymarketPublicClient:
             settlement_verified=verified,
             settlement_notes=notes,
             markets=markets,
+        )
+
+    def fetch_paris_market(self, target_date_local: date) -> MarketSnapshot:
+        """Backward-compatible Paris entry point for existing callers."""
+        return self.fetch_temperature_market(
+            target_date_local,
+            city_name="Paris",
+            station_markers=("lfpb", "le bourget"),
         )
 
     def fetch_resolved_token_prices(self, market_slugs: set[str]) -> dict[str, float]:
@@ -93,12 +111,18 @@ class PolymarketPublicClient:
                     prices[token_id] = 1.0
         return prices
 
-    def _select_event(self, events: list[dict[str, Any]], target_date_local: date) -> dict[str, Any]:
+    def _select_event(
+        self,
+        events: list[dict[str, Any]],
+        target_date_local: date,
+        *,
+        city_name: str = "Paris",
+    ) -> dict[str, Any]:
         candidates = []
         for event in events:
             title = str(event.get("title") or "")
             normalized = title.lower()
-            if "highest temperature" not in normalized or "paris" not in normalized:
+            if "highest temperature" not in normalized or city_name.lower() not in normalized:
                 continue
             event_date = _extract_event_date(event)
             if event_date is not None and event_date != target_date_local:
@@ -106,7 +130,7 @@ class PolymarketPublicClient:
             candidates.append(event)
         if not candidates:
             raise RuntimeError(
-                f"No active Paris highest-temperature event found for {target_date_local.isoformat()}"
+                f"No active {city_name} highest-temperature event found for {target_date_local.isoformat()}"
             )
         exact_dates = [
             event
@@ -175,14 +199,19 @@ class PolymarketPublicClient:
         return "\n".join(str(part) for part in parts if part)
 
 
-def validate_settlement_text(text: str) -> tuple[bool, list[str]]:
+def validate_settlement_text(
+    text: str,
+    *,
+    city_name: str = "Paris",
+    station_markers: tuple[str, ...] = ("lfpb", "le bourget"),
+) -> tuple[bool, list[str]]:
     normalized = text.lower()
     notes = []
-    if "paris" not in normalized:
-        notes.append("settlement text does not identify Paris")
+    if city_name.lower() not in normalized:
+        notes.append(f"settlement text does not identify {city_name}")
     source_verified = any(
         marker in normalized
-        for marker in ("lfpb", "le bourget", "weather underground", "wunderground")
+        for marker in (*station_markers, "weather underground", "wunderground")
     )
     if not source_verified:
         notes.append("station or weather source was not recognized")

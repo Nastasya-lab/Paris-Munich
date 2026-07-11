@@ -6,6 +6,8 @@ from html import escape
 def format_trade_events(result: dict) -> list[str]:
     messages = []
     signal_label = _signal_label(result.get("signal_variant"))
+    city_name = str(result.get("city_name") or "Paris")
+    airport = str(result.get("airport") or "LFPB")
     settlement_note = (
         "Settlement проверен"
         if result.get("settlement_verified")
@@ -16,7 +18,7 @@ def format_trade_events(result: dict) -> list[str]:
         side = str(event["side"])
         temperature = _temperature_label(str(event["question"]))
         lines = [
-            f"<b>POLYMARKET PAPER - PARIS - {escape(action)}</b>",
+            f"<b>POLYMARKET PAPER - {escape(city_name.upper())} {escape(airport)} - {escape(action)}</b>",
             f"Источник сигнала: <b>{escape(signal_label)}</b>",
             f"{escape(settlement_note)}",
             "",

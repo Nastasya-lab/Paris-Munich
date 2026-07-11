@@ -133,6 +133,52 @@ def test_client_selects_exact_date_from_year_in_slug(tmp_path):
     assert selected["slug"].endswith("june-23-2026")
 
 
+def test_client_selects_the_requested_city_market(tmp_path):
+    client = PolymarketPublicClient(_config(tmp_path))
+    events = [
+        {
+            "title": "Highest temperature in Munich on June 23?",
+            "slug": "highest-temperature-in-munich-on-june-23-2026",
+        },
+        {
+            "title": "Highest temperature in Paris on June 23?",
+            "slug": "highest-temperature-in-paris-on-june-23-2026",
+        },
+    ]
+    selected = client._select_event(events, date(2026, 6, 23), city_name="Munich")
+    assert "munich" in selected["slug"]
+
+
+def test_config_uses_isolated_airport_prefixes(monkeypatch, tmp_path):
+    monkeypatch.setenv("EDDM_POLYMARKET_STATE_PATH", str(tmp_path / "eddm-state.json"))
+    monkeypatch.setenv("EDDM_POLYMARKET_DECISION_LOG_PATH", str(tmp_path / "eddm-decisions.jsonl"))
+    config = PaperTradingConfig.from_env("EDDM")
+
+    assert config.state_path.name == "eddm-state.json"
+    assert config.decision_log_path.name == "eddm-decisions.jsonl"
+    assert config.signal_variant == "production_champion"
+
+
+def test_forecast_loader_supports_flat_operational_airport_report(tmp_path):
+    path = tmp_path / "eddm.json"
+    path.write_text(
+        json.dumps(
+            {
+                "forecast_id": None,
+                "airport": "EDDM",
+                "target_date_local": "2026-06-23",
+                "issue_time_utc": "2026-06-23T10:30:00+00:00",
+                "probabilities_by_integer_c": {"25": 0.25, "26": 0.75},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    signal = load_forecast_signal(path, "production_champion", expected_airport="EDDM")
+    assert signal.shadow_probabilities == {25: 0.25, 26: 0.75}
+    assert signal.forecast_id == "EDDM:2026-06-23T10:30:00+00:00"
+
+
 def test_engine_opens_best_shadow_trade_and_reserves_cash(tmp_path):
     config = _config(tmp_path)
     signal = _signal({25: 0.2, 26: 0.7, 27: 0.1}, {25: 0.4, 26: 0.4, 27: 0.2})

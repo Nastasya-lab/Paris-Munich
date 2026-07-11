@@ -6,6 +6,7 @@ import os
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -30,19 +31,52 @@ DEFAULT_FORECAST_PATH = Path(
 )
 DEFAULT_METAR_PATH = Path("data/forecasts/awc_metar_live_LFPB.parquet")
 
+AIRPORT_SPECS = {
+    "LFPB": {
+        "city_name": "Paris",
+        "timezone": "Europe/Paris",
+        "env_prefix": "LFPB",
+        "report_path": "data/reports/latest_lfpb_icon_d2_metar_tmax_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_LFPB.parquet",
+        "station_markers": ("lfpb", "le bourget"),
+    },
+    "EDDM": {
+        "city_name": "Munich",
+        "timezone": "Europe/Berlin",
+        "env_prefix": "EDDM",
+        "report_path": "data/reports/latest_operational_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_EDDM.parquet",
+        "station_markers": ("eddm", "munich", "muenchen", "münchen"),
+    },
+    "EHAM": {
+        "city_name": "Amsterdam",
+        "timezone": "Europe/Amsterdam",
+        "env_prefix": "EHAM",
+        "report_path": "data/reports/latest_eham_icon_d2_metar_tmax_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_EHAM.parquet",
+        "station_markers": ("eham", "amsterdam", "schiphol"),
+    },
+}
+
 
 def main() -> None:
     args = _parse_args()
-    config = PaperTradingConfig.from_env()
-    _activate_lfpb_telegram()
+    spec = AIRPORT_SPECS[args.airport]
+    config = PaperTradingConfig.from_env(args.env_prefix or spec["env_prefix"])
+    _activate_airport_telegram(args.airport)
     if not config.enabled and not args.force:
         _print_result({"status": "disabled", "enabled": False})
         return
     try:
         result = run_paper_cycle(
-            Path(args.forecast_path),
+            Path(args.forecast_path or spec["report_path"]),
             config=config,
             force_window=args.force_window,
+            airport=args.airport,
+            city_name=spec["city_name"],
+            timezone=ZoneInfo(spec["timezone"]),
+            station_markers=spec["station_markers"],
+            metar_path=Path(args.metar_path or spec["metar_path"]),
         )
         if args.notify:
             result["telegram"] = [
@@ -72,10 +106,15 @@ def run_paper_cycle(
     config: PaperTradingConfig,
     client: PolymarketPublicClient | None = None,
     force_window: bool = False,
+    airport: str = "LFPB",
+    city_name: str = "Paris",
+    timezone: ZoneInfo = PARIS_TIMEZONE,
+    station_markers: tuple[str, ...] = ("lfpb", "le bourget"),
+    metar_path: Path = DEFAULT_METAR_PATH,
 ) -> dict:
     metadata = _read_forecast_metadata(forecast_path)
     now_utc = datetime.now(UTC)
-    now_local = now_utc.astimezone(PARIS_TIMEZONE)
+    now_local = now_utc.astimezone(timezone)
     target_date_local = metadata.get("target_date_local")
     if target_date_local is not None and target_date_local < now_local.date():
         result = {
@@ -89,7 +128,11 @@ def run_paper_cycle(
         append_decision_log(config.decision_log_path, result)
         return result
     try:
-        signal = load_forecast_signal(forecast_path, config.signal_variant)
+        signal = load_forecast_signal(
+            forecast_path,
+            config.signal_variant,
+            expected_airport=airport,
+        )
     except ValueError as exc:
         if "has no probability distribution" not in str(exc):
             raise
@@ -107,6 +150,7 @@ def run_paper_cycle(
         signal,
         start_hour=config.local_hour_start,
         end_hour=config.local_hour_end,
+        timezone=timezone,
     ):
         result = {
             "status": "outside_trading_window",
@@ -128,14 +172,20 @@ def run_paper_cycle(
     fallback_prices, fallback_notes = _local_metar_resolved_token_prices(
         state.positions,
         current_date_local=now_local.date(),
-        metar_path=DEFAULT_METAR_PATH,
+        metar_path=metar_path,
+        timezone=timezone,
+        airport=airport,
     )
     resolved_token_reasons = {}
     for token_id, payout in fallback_prices.items():
         if token_id not in resolved_token_prices:
             resolved_token_prices[token_id] = payout
-            resolved_token_reasons[token_id] = "local_lfpb_metar_truth_fallback"
-    snapshot = market_client.fetch_paris_market(signal.target_date_local)
+            resolved_token_reasons[token_id] = f"local_{airport.lower()}_metar_truth_fallback"
+    snapshot = market_client.fetch_temperature_market(
+        signal.target_date_local,
+        city_name=city_name,
+        station_markers=station_markers,
+    )
     result = PaperTradingEngine(config).process(
         signal,
         snapshot,
@@ -145,6 +195,8 @@ def run_paper_cycle(
     )
     result.update(
         {
+            "airport": airport,
+            "city_name": city_name,
             "event_title": snapshot.event_title,
             "event_slug": snapshot.event_slug,
             "created_at_utc": datetime.now(UTC).isoformat(),
@@ -162,6 +214,8 @@ def _local_metar_resolved_token_prices(
     *,
     current_date_local: date,
     metar_path: Path,
+    timezone: ZoneInfo = PARIS_TIMEZONE,
+    airport: str = "LFPB",
 ) -> tuple[dict[str, float], list[dict]]:
     if not positions or not metar_path.exists():
         return {}, []
@@ -178,7 +232,7 @@ def _local_metar_resolved_token_prices(
     observations = observations.dropna(subset=["observation_time_utc", "temperature_c"])
     if observations.empty:
         return {}, []
-    observations["target_date_local"] = observations["observation_time_utc"].dt.tz_convert(PARIS_TIMEZONE).dt.date
+    observations["target_date_local"] = observations["observation_time_utc"].dt.tz_convert(timezone).dt.date
 
     payouts: dict[str, float] = {}
     notes: list[dict] = []
@@ -206,7 +260,7 @@ def _local_metar_resolved_token_prices(
                 "temperature_c": position.temperature_c,
                 "tail": position.tail,
                 "payout": payout,
-                "reason": "local_lfpb_metar_truth_fallback",
+                "reason": f"local_{airport.lower()}_metar_truth_fallback",
             }
         )
     return payouts, notes
@@ -235,9 +289,12 @@ def _read_forecast_metadata(path: Path) -> dict:
     }
 
 
-def _activate_lfpb_telegram() -> None:
-    token = os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID_LFPB")
+def _activate_airport_telegram(airport: str) -> None:
+    token = os.getenv(f"TELEGRAM_BOT_TOKEN_{airport}")
+    chat_id = os.getenv(f"TELEGRAM_CHAT_ID_{airport}")
+    if airport == "EHAM":
+        token = token or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
+        chat_id = chat_id or "-1004216691526"
     if token:
         os.environ["TELEGRAM_BOT_TOKEN"] = token
     if chat_id:
@@ -246,19 +303,22 @@ def _activate_lfpb_telegram() -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the isolated LFPB shadow-unimodal Polymarket paper trader."
+        description="Run an isolated airport Polymarket paper trader."
     )
-    parser.add_argument("--forecast-path", default=str(DEFAULT_FORECAST_PATH))
+    parser.add_argument("--airport", choices=sorted(AIRPORT_SPECS), default="LFPB")
+    parser.add_argument("--forecast-path", default=None)
+    parser.add_argument("--metar-path", default=None)
+    parser.add_argument("--env-prefix", default=None)
     parser.add_argument("--notify", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Run even when LFPB_POLYMARKET_PAPER_ENABLED is disabled.",
+        help="Run even when the selected airport paper-trading module is disabled.",
     )
     parser.add_argument(
         "--force-window",
         action="store_true",
-        help="Ignore the configured Paris-local trading window.",
+        help="Ignore the configured airport-local trading window.",
     )
     parser.add_argument(
         "--fail-on-error",

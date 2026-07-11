@@ -57,6 +57,7 @@ def main(
             target=target,
             request_timeout=timeout,
         )
+        _run_polymarket_paper_if_enabled(airport)
         print(json.dumps(_compact_job_result(job, payload), indent=2, default=str))
         return
     elif job == "metar-event":
@@ -80,6 +81,8 @@ def main(
                 target=target,
                 request_timeout=timeout,
             )
+        if result.get("status") == "new_metar_forecast":
+            _run_polymarket_paper_if_enabled(airport)
         print(json.dumps(_compact_job_result(job, result), indent=2, default=str))
         return
     elif job == "outcome":
@@ -287,6 +290,32 @@ def _compact_job_result(job: str, payload: dict) -> dict:
             if value is not None
         }
     return {key: value for key, value in compact.items() if value is not None}
+
+
+def _run_polymarket_paper_if_enabled(airport: str) -> None:
+    if airport != "EDDM":
+        return
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/83_lfpb_polymarket_paper_job.py",
+            "--airport",
+            airport,
+            "--notify",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if completed.stdout:
+        print(f"\n===== {airport} Polymarket paper stdout =====\n{completed.stdout}")
+    if completed.stderr:
+        print(f"\n===== {airport} Polymarket paper stderr =====\n{completed.stderr}", file=sys.stderr)
+    if completed.returncode != 0:
+        print(
+            f"{airport} Polymarket paper job failed; the weather forecast remains successful.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

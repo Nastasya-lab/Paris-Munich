@@ -20,25 +20,32 @@ class ForecastSignal:
     production_probabilities: dict[int, float]
 
 
-def load_forecast_signal(path: Path, variant: str) -> ForecastSignal:
+def load_forecast_signal(
+    path: Path,
+    variant: str,
+    *,
+    expected_airport: str = "LFPB",
+) -> ForecastSignal:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("airport") != "LFPB":
-        raise ValueError("Polymarket Paris paper trader only accepts LFPB forecasts")
+    if payload.get("airport") != expected_airport:
+        raise ValueError(
+            f"Polymarket paper trader expected {expected_airport} forecast, got {payload.get('airport')}"
+        )
     variants = payload.get("forecast_variants") or {}
     variant_payload = variants.get(variant) or {}
     distribution = variant_payload.get("distribution") or {}
     if variant == "production_champion" and not distribution:
-        distribution = payload.get("forecast") or {}
+        distribution = payload.get("forecast") or payload
     shadow = _normalize_probabilities(distribution.get("probabilities_by_integer_c") or {})
     if not shadow:
         raise ValueError(f"Forecast variant {variant!r} has no probability distribution")
     production = _normalize_probabilities(
-        ((payload.get("forecast") or {}).get("probabilities_by_integer_c") or {})
+        ((payload.get("forecast") or payload).get("probabilities_by_integer_c") or {})
     )
     issue_time = datetime.fromisoformat(str(payload["issue_time_utc"]).replace("Z", "+00:00"))
     target_date = date.fromisoformat(str(payload["target_date_local"]))
     return ForecastSignal(
-        forecast_id=payload.get("forecast_id"),
+        forecast_id=payload.get("forecast_id") or f"{expected_airport}:{issue_time.isoformat()}",
         issue_time_utc=issue_time,
         target_date_local=target_date,
         variant=variant,
@@ -52,8 +59,9 @@ def is_in_trading_window(
     *,
     start_hour: int,
     end_hour: int,
+    timezone: ZoneInfo = PARIS_TIMEZONE,
 ) -> bool:
-    local = signal.issue_time_utc.astimezone(PARIS_TIMEZONE)
+    local = signal.issue_time_utc.astimezone(timezone)
     return signal.target_date_local == local.date() and start_hour <= local.hour < end_hour
 
 
