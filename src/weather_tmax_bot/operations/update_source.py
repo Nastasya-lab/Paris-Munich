@@ -22,8 +22,7 @@ def record_update_source(*, airport: str, trigger: str, payload: dict[str, Any])
         "current": current,
     }
     state.setdefault("airports", {})[airport] = current
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+    result["state_persisted"] = _save_state(state)
     return result
 
 
@@ -69,6 +68,25 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _changed(previous: dict[str, Any] | None, current: dict[str, Any], key: str) -> bool:
     return bool(previous) and (previous.get(key) or {}) != (current.get(key) or {})
+
+
+def _load_state() -> dict[str, Any]:
+    if not STATE_PATH.exists():
+        return {"airports": {}}
+    try:
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"airports": {}}
+    return state if isinstance(state, dict) else {"airports": {}}
+
+
+def _save_state(state: dict[str, Any]) -> bool:
+    try:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+    except OSError:
+        return False
+    return True
 
 
 def _metar_label(value: dict[str, Any] | None) -> str:
