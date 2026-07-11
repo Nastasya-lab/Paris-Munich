@@ -13,6 +13,7 @@ from weather_tmax_bot.operations.predict_run import run_prediction
 from weather_tmax_bot.operations.refresh import refresh_awc_live, refresh_spatial_awc_live
 from weather_tmax_bot.features.spatial_metar import SPATIAL_STATIONS_BY_AIRPORT
 from weather_tmax_bot.operations.run_report import operational_prediction_payload
+from weather_tmax_bot.operations.update_source import record_update_source
 
 
 DEFAULT_NOTIFY_THRESHOLDS = {
@@ -32,6 +33,7 @@ def run_metar_event_cycle(
     log: bool = True,
     root: str | Path = ".",
     forecast_log_path: str | Path = "data/logs/forecast_log.jsonl",
+    update_trigger: str = "new_metar",
 ) -> dict:
     """Refresh live METAR and emit an intraday update for every new report.
 
@@ -89,6 +91,11 @@ def run_metar_event_cycle(
     )
     payload["refresh_summary"] = refresh_summary
     payload["latest_metar_record"] = latest_metar_record
+    payload["update_source"] = record_update_source(
+        airport=airport,
+        trigger=update_trigger,
+        payload=payload,
+    )
     comparison = compare_forecast_to_previous(payload, previous_record)
     should_notify, notification_reasons = should_notify_metar_event(payload, comparison)
     telegram_notification = None

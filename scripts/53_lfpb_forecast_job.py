@@ -24,6 +24,8 @@ def main() -> None:
         args.target_date or datetime.now(ZoneInfo("Europe/Paris")).date().isoformat(),
         "--issue-time",
         args.issue_time,
+        "--update-trigger",
+        "scheduled_forecast",
         "--auto-refresh",
         "--refresh-nwp",
         "--notify",

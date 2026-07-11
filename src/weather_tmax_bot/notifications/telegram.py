@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from weather_tmax_bot.operations.update_source import format_update_source_lines
+
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 LOCAL_TIMEZONE = ZoneInfo("Europe/Berlin")
 
@@ -76,6 +78,7 @@ def format_operational_cycle_message(summary: dict) -> str:
         forecast=forecast,
         latest_metar=summary.get("latest_metar_record") or forecast.get("latest_metar_record") or {},
         comparison=None,
+        update_source=summary.get("update_source"),
     )
     acceptance = summary.get("forecast_acceptance", {})
     quality = summary.get("forecast_quality", {})
@@ -130,6 +133,7 @@ def _format_compact_forecast_message(
     forecast: dict,
     latest_metar: dict,
     comparison: dict | None,
+    update_source: dict | None = None,
 ) -> str:
     components = forecast.get("forecast_components", {}) or {}
     variants = forecast.get("forecast_variants", {}) or {}
@@ -140,6 +144,8 @@ def _format_compact_forecast_message(
         f"Выпуск: {_format_airport_local_time(issue_time_utc, airport)}",
         "",
         *_format_used_metar(latest_metar, airport),
+        "",
+        *format_update_source_lines(update_source),
         "",
         *_format_model_block(
             "Рабочая модель",
@@ -668,6 +674,7 @@ def format_metar_event_message(payload: dict, comparison: dict, reasons: list[st
         forecast=payload,
         latest_metar=payload.get("latest_metar_record") or {},
         comparison=comparison,
+        update_source=payload.get("update_source"),
     )
     forecast_components = payload.get("forecast_components", {}) or {}
     intraday = forecast_components.get("intraday_update", {}) or {}

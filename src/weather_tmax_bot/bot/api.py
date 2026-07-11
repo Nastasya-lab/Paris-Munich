@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+import json
+from pathlib import Path
 from numbers import Integral, Real
 from zoneinfo import ZoneInfo
 
@@ -32,6 +34,7 @@ from weather_tmax_bot.operations.pending_truth import pending_truth_status, run_
 from weather_tmax_bot.operations.quality import assess_forecast_quality
 from weather_tmax_bot.operations.run_report import operational_prediction_payload
 from weather_tmax_bot.operations.workflow import run_operational_cycle
+from weather_tmax_bot.operations.update_source import record_update_source
 from weather_tmax_bot.temporal.freshness_gate import evaluate_freshness_gate
 from weather_tmax_bot.utils.time import parse_issue_time
 
@@ -117,6 +120,7 @@ def operational_cycle(
     log: bool = True,
     update_reports: bool = False,
     notify: bool = True,
+    update_trigger: str = "scheduled_forecast",
     api_key: str | None = None,
     x_api_key: str | None = Header(default=None),
 ):
@@ -135,6 +139,12 @@ def operational_cycle(
         mode="api_operational_cycle",
         allow_issue_time_advance=issue_time in (None, "now"),
     )
+    report_payload = json.loads(Path(summary["prediction_report_path"]).read_text(encoding="utf-8"))
+    summary["update_source"] = record_update_source(
+        airport=airport,
+        trigger=update_trigger,
+        payload=report_payload,
+    )
     if notify:
         summary["telegram_notification"] = notify_if_configured(format_operational_cycle_message(summary))
     return _json_safe(summary)
@@ -147,6 +157,7 @@ def metar_event_cycle(
     issue_time: str = "now",
     log: bool = True,
     notify: bool = True,
+    update_trigger: str = "new_metar",
     api_key: str | None = None,
     x_api_key: str | None = Header(default=None),
 ):
@@ -159,6 +170,7 @@ def metar_event_cycle(
         issue_time_utc=issue,
         log=log,
         notify=notify,
+        update_trigger=update_trigger,
     ))
 
 

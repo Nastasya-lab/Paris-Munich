@@ -53,6 +53,8 @@ def _run_forecast(args: argparse.Namespace) -> None:
         target_date,
         "--issue-time",
         args.issue_time,
+        "--update-trigger",
+        "new_metar",
     ]
     if not args.log:
         command.append("--no-log")

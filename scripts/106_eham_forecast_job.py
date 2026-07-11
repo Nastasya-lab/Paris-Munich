@@ -24,6 +24,8 @@ def main() -> None:
         args.target_date or datetime.now(ZoneInfo("Europe/Amsterdam")).date().isoformat(),
         "--issue-time",
         args.issue_time,
+        "--update-trigger",
+        args.update_trigger,
         "--auto-refresh",
         "--refresh-nwp",
         "--notify",
@@ -78,6 +80,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one EHAM ICON-D2 METAR Tmax forecast and notify Telegram.")
     parser.add_argument("--target-date", default=None)
     parser.add_argument("--issue-time", default="now")
+    parser.add_argument("--update-trigger", choices=["scheduled_forecast", "new_metar"], default="scheduled_forecast")
     parser.add_argument("--log", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 

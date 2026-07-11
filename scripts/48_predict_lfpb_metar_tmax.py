@@ -25,6 +25,7 @@ from weather_tmax_bot.models.distribution import (
 from weather_tmax_bot.models.hf_icon_eu_shadow import build_hf_icon_eu_live_feature_row
 from weather_tmax_bot.models.metar_intraday_survival import apply_metar_intraday_survival_layer
 from weather_tmax_bot.notifications.telegram import notify_if_configured
+from weather_tmax_bot.operations.update_source import format_update_source_lines, record_update_source
 from weather_tmax_bot.operations.metar_event import compare_forecast_to_previous
 from weather_tmax_bot.operations.refresh import refresh_awc_live
 from weather_tmax_bot.utils.time import parse_issue_time, to_local_date
@@ -276,6 +277,11 @@ def main() -> None:
             "forecast_variants": forecast_variants,
         },
         previous_record,
+    )
+    payload["update_source"] = record_update_source(
+        airport=args.airport,
+        trigger=args.update_trigger,
+        payload=payload,
     )
     report_path = Path(args.report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1092,6 +1098,8 @@ def _format_lfpb_compact_message(payload: dict) -> str:
         "",
         *_format_lfpb_used_metar_compact(signal),
         "",
+        *format_update_source_lines(payload.get("update_source")),
+        "",
         *_format_lfpb_model_block(
             "Рабочая модель",
             str(payload.get("model_version") or "не указана"),
@@ -1500,6 +1508,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--airport", default=AIRPORT)
     parser.add_argument("--target-date", default=None)
     parser.add_argument("--issue-time", default="now")
+    parser.add_argument("--update-trigger", choices=["scheduled_forecast", "new_metar"], default="scheduled_forecast")
     parser.add_argument("--auto-refresh", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--refresh-nwp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--notify", action=argparse.BooleanOptionalAction, default=False)

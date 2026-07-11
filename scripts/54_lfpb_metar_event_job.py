@@ -55,6 +55,8 @@ def _run_forecast(args: argparse.Namespace) -> None:
         target_date,
         "--issue-time",
         args.issue_time,
+        "--update-trigger",
+        "new_metar",
         "--auto-refresh",
         "--refresh-nwp",
         "--notify",
