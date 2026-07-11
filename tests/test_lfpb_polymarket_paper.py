@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import importlib.util
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -207,6 +208,88 @@ def test_engine_sells_when_shadow_edge_disappears(tmp_path):
     assert state.cash_balance_usd == pytest.approx(1004.666666, rel=1e-5)
 
 
+def test_engine_opens_only_confirmed_no_candidate(tmp_path):
+    config = replace(_config(tmp_path), allow_yes_positions=False, signal_confirmations_required=2)
+    signal = _signal({25: 0.1, 26: 0.1, 27: 0.8}, {25: 0.2, 26: 0.2, 27: 0.6})
+    snapshot = _snapshot(
+        [
+            _market(
+                market_id="m26",
+                temperature=26,
+                yes_asks=[OrderLevel(0.20, 100)],
+                yes_bids=[OrderLevel(0.18, 100)],
+                no_asks=[OrderLevel(0.60, 100)],
+                no_bids=[OrderLevel(0.58, 100)],
+            )
+        ]
+    )
+    state = PaperState(1, 1000.0, 1000.0, 0.0)
+    engine = PaperTradingEngine(config)
+
+    first = engine.process(signal, snapshot, state)
+    assert first["events"] == []
+    assert first["candidate_snapshots"][0]["side"] == "NO"
+    assert first["holds"][0]["reason"] == "entry_confirmation_pending"
+    assert state.pending_entries
+
+    duplicate = engine.process(signal, snapshot, state)
+    assert duplicate["events"] == []
+    assert duplicate["holds"][0]["confirmation_count"] == 1
+
+    confirmed = replace(signal, forecast_id="f-confirmed")
+    result = engine.process(confirmed, snapshot, state)
+    assert [event["action"] for event in result["events"]] == ["BUY"]
+    assert result["events"][0]["side"] == "NO"
+
+
+def test_engine_sells_only_after_confirmed_exit_signal(tmp_path):
+    config = replace(_config(tmp_path), signal_confirmations_required=2)
+    signal = _signal({26: 0.45, 27: 0.55}, {26: 0.6, 27: 0.4})
+    position = PaperPosition(
+        position_id="p-no",
+        market_id="m26",
+        question="Will the highest temperature in Paris be 26 C on June 23?",
+        token_id="no-m26",
+        side="NO",
+        temperature_c=26,
+        tail="exact",
+        target_date_local="2026-06-23",
+        entry_price=0.30,
+        entry_model_probability=0.70,
+        entry_production_probability=0.50,
+        entry_raw_edge=0.40,
+        entry_effective_edge=0.34,
+        size_usd=10.0,
+        shares=10.0 / 0.30,
+        opened_at_utc="2026-06-23T10:00:00+00:00",
+        forecast_id="old",
+        market_slug="paris-26c",
+    )
+    state = PaperState(1, 1000.0, 990.0, 0.0, positions=[position])
+    snapshot = _snapshot(
+        [
+            _market(
+                market_id="m26",
+                temperature=26,
+                yes_asks=[OrderLevel(0.46, 100)],
+                yes_bids=[OrderLevel(0.44, 100)],
+                no_asks=[OrderLevel(0.57, 100)],
+                no_bids=[OrderLevel(0.54, 100)],
+            )
+        ]
+    )
+    engine = PaperTradingEngine(config)
+
+    first = engine.process(signal, snapshot, state)
+    assert first["events"] == []
+    assert first["holds"][0]["reason"] == "exit_confirmation_pending"
+    assert len(state.positions) == 1
+
+    result = engine.process(replace(signal, forecast_id="f-exit-confirmed"), snapshot, state)
+    assert result["events"][0]["action"] == "SELL"
+    assert not state.positions
+
+
 def test_engine_settles_position_from_official_token_price(tmp_path):
     config = _config(tmp_path)
     signal = _signal({26: 0.5, 27: 0.5}, {26: 0.5, 27: 0.5})
@@ -309,6 +392,8 @@ def test_config_enables_paper_trading_by_default(monkeypatch, tmp_path):
 
     assert PaperTradingConfig.from_env().enabled is True
     assert PaperTradingConfig.from_env().signal_variant == "production_champion"
+    assert PaperTradingConfig.from_env().allow_yes_positions is False
+    assert PaperTradingConfig.from_env().signal_confirmations_required == 2
 
     monkeypatch.setenv("LFPB_POLYMARKET_PAPER_ENABLED", "0")
     assert PaperTradingConfig.from_env().enabled is False
@@ -362,6 +447,8 @@ def _config(tmp_path: Path) -> PaperTradingConfig:
         min_contract_price=0.02,
         max_contract_price=0.95,
         min_fill_ratio=0.98,
+        allow_yes_positions=True,
+        signal_confirmations_required=1,
         local_hour_start=10,
         local_hour_end=17,
         require_verified_settlement=False,

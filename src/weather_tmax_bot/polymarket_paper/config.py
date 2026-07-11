@@ -29,6 +29,8 @@ class PaperTradingConfig:
     min_contract_price: float
     max_contract_price: float
     min_fill_ratio: float
+    allow_yes_positions: bool
+    signal_confirmations_required: int
     local_hour_start: int
     local_hour_end: int
     require_verified_settlement: bool
@@ -66,6 +68,11 @@ class PaperTradingConfig:
             min_contract_price=float(os.getenv("LFPB_POLYMARKET_MIN_CONTRACT_PRICE", "0.02")),
             max_contract_price=float(os.getenv("LFPB_POLYMARKET_MAX_CONTRACT_PRICE", "0.95")),
             min_fill_ratio=float(os.getenv("LFPB_POLYMARKET_MIN_FILL_RATIO", "0.98")),
+            allow_yes_positions=_env_bool("LFPB_POLYMARKET_ALLOW_YES", False),
+            signal_confirmations_required=max(
+                1,
+                int(os.getenv("LFPB_POLYMARKET_SIGNAL_CONFIRMATIONS_REQUIRED", "2")),
+            ),
             local_hour_start=int(os.getenv("LFPB_POLYMARKET_LOCAL_HOUR_START", "10")),
             local_hour_end=int(os.getenv("LFPB_POLYMARKET_LOCAL_HOUR_END", "17")),
             require_verified_settlement=_env_bool(

@@ -43,7 +43,8 @@ class PaperTradingEngine:
         )
         self._review_positions(signal, state, market_by_id, now, events, holds)
         candidates = self._build_candidates(signal, snapshot, state)
-        self._open_candidates(signal, state, candidates, now, events)
+        candidate_snapshots = self._candidate_snapshots(candidates)
+        self._open_candidates(signal, state, candidates, now, events, holds)
         state.last_forecast_id = signal.forecast_id
         return {
             "status": "processed",
@@ -55,6 +56,7 @@ class PaperTradingEngine:
             "events": [event.to_dict() for event in events],
             "holds": holds,
             "candidate_count": len(candidates),
+            "candidate_snapshots": candidate_snapshots,
             "open_positions": [position.to_dict() for position in state.positions],
             "cash_balance_usd": round(state.cash_balance_usd, 2),
             "realized_pnl_usd": round(state.realized_pnl_usd, 2),
@@ -104,6 +106,7 @@ class PaperTradingEngine:
             )
             state.events.append(event)
             events.append(event)
+            state.pending_exits.pop(position.position_id, None)
         state.positions = remaining
 
     def _review_positions(
@@ -159,6 +162,7 @@ class PaperTradingEngine:
             position.last_unrealized_pnl_usd = quote.notional_usd - position.size_usd
             position.updated_at_utc = now
             if effective_edge > self.config.close_effective_edge:
+                state.pending_exits.pop(position.position_id, None)
                 remaining.append(position)
                 holds.append(
                     {
@@ -169,6 +173,26 @@ class PaperTradingEngine:
                     }
                 )
                 continue
+            confirmations = self._confirmation_count(
+                state.pending_exits,
+                position.position_id,
+                signal.forecast_id,
+            )
+            if confirmations < self.config.signal_confirmations_required:
+                remaining.append(position)
+                holds.append(
+                    {
+                        "position_id": position.position_id,
+                        "action": "HOLD",
+                        "reason": "exit_confirmation_pending",
+                        "confirmation_count": confirmations,
+                        "confirmations_required": self.config.signal_confirmations_required,
+                        "effective_edge": effective_edge,
+                        "price": quote.average_price,
+                    }
+                )
+                continue
+            state.pending_exits.pop(position.position_id, None)
             proceeds = quote.notional_usd
             pnl = proceeds - position.size_usd
             state.cash_balance_usd += proceeds
@@ -230,10 +254,13 @@ class PaperTradingEngine:
                 market.temperature_c,
                 market.tail,
             )
-            for side, token_id, levels, fair, production in (
+            candidate_sides = (
                 ("YES", market.yes_token_id, market.yes_asks, fair_yes, production_yes),
                 ("NO", market.no_token_id, market.no_asks, 1.0 - fair_yes, 1.0 - production_yes),
-            ):
+            )
+            for side, token_id, levels, fair, production in candidate_sides:
+                if side == "YES" and not self.config.allow_yes_positions:
+                    continue
                 if token_id in open_tokens:
                     continue
                 quote = quote_buy(levels, position_budget)
@@ -283,13 +310,41 @@ class PaperTradingEngine:
         candidates: list[TradeCandidate],
         now: str,
         events: list[TradeEvent],
+        holds: list[dict],
     ) -> None:
+        candidate_tokens = {candidate.token_id for candidate in candidates}
+        state.pending_entries = {
+            token_id: pending
+            for token_id, pending in state.pending_entries.items()
+            if token_id in candidate_tokens
+        }
         used_markets = {position.market_id for position in state.positions}
         for candidate in candidates:
             if len(state.positions) >= self.config.max_positions:
                 break
             if candidate.market_id in used_markets:
                 continue
+            confirmations = self._confirmation_count(
+                state.pending_entries,
+                candidate.token_id,
+                signal.forecast_id,
+            )
+            if confirmations < self.config.signal_confirmations_required:
+                holds.append(
+                    {
+                        "market_id": candidate.market_id,
+                        "token_id": candidate.token_id,
+                        "action": "HOLD",
+                        "reason": "entry_confirmation_pending",
+                        "confirmation_count": confirmations,
+                        "confirmations_required": self.config.signal_confirmations_required,
+                        "side": candidate.side,
+                        "effective_edge": candidate.effective_edge,
+                        "price": candidate.quote.average_price,
+                    }
+                )
+                continue
+            state.pending_entries.pop(candidate.token_id, None)
             daily_exposure = sum(
                 position.size_usd
                 for position in state.positions
@@ -343,9 +398,43 @@ class PaperTradingEngine:
                 raw_edge=position.entry_raw_edge,
                 effective_edge=position.entry_effective_edge,
                 realized_pnl_usd=None,
-                reason="shadow_unimodal_effective_edge_above_entry_threshold",
+                reason="production_effective_edge_above_entry_threshold",
                 forecast_id=signal.forecast_id,
             )
             state.events.append(event)
             events.append(event)
             used_markets.add(candidate.market_id)
+
+    @staticmethod
+    def _confirmation_count(
+        pending: dict[str, dict],
+        key: str,
+        forecast_id: str | None,
+    ) -> int:
+        record = pending.get(key)
+        if record is not None and record.get("forecast_id") == forecast_id:
+            return int(record.get("count", 1))
+        count = int((record or {}).get("count", 0)) + 1
+        pending[key] = {"count": count, "forecast_id": forecast_id}
+        return count
+
+    @staticmethod
+    def _candidate_snapshots(candidates: list[TradeCandidate]) -> list[dict]:
+        return [
+            {
+                "market_id": candidate.market_id,
+                "market_slug": candidate.market_slug,
+                "token_id": candidate.token_id,
+                "side": candidate.side,
+                "temperature_c": candidate.temperature_c,
+                "tail": candidate.tail,
+                "price": candidate.quote.average_price,
+                "notional_usd": candidate.quote.notional_usd,
+                "fill_ratio": candidate.quote.fill_ratio,
+                "model_probability": candidate.model_probability,
+                "production_probability": candidate.production_probability,
+                "raw_edge": candidate.raw_edge,
+                "effective_edge": candidate.effective_edge,
+            }
+            for candidate in candidates
+        ]

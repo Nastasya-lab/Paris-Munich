@@ -19,6 +19,8 @@ class PaperState:
     realized_pnl_usd: float
     positions: list[PaperPosition] = field(default_factory=list)
     events: list[TradeEvent] = field(default_factory=list)
+    pending_entries: dict[str, dict[str, Any]] = field(default_factory=dict)
+    pending_exits: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_forecast_id: str | None = None
     updated_at_utc: str | None = None
 
@@ -31,6 +33,8 @@ class PaperState:
             **asdict(self),
             "positions": [position.to_dict() for position in self.positions],
             "events": [event.to_dict() for event in self.events],
+            "pending_entries": self.pending_entries,
+            "pending_exits": self.pending_exits,
         }
 
 
@@ -55,6 +59,8 @@ class PaperStateStore:
             realized_pnl_usd=float(payload.get("realized_pnl_usd", 0.0)),
             positions=[PaperPosition(**item) for item in payload.get("positions", [])],
             events=[TradeEvent(**item) for item in payload.get("events", [])],
+            pending_entries=dict(payload.get("pending_entries") or {}),
+            pending_exits=dict(payload.get("pending_exits") or {}),
             last_forecast_id=payload.get("last_forecast_id"),
             updated_at_utc=payload.get("updated_at_utc"),
         )
@@ -84,4 +90,3 @@ def append_decision_log(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
-
