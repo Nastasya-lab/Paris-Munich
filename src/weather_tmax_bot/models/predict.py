@@ -28,8 +28,6 @@ from weather_tmax_bot.utils.time import local_day_bounds_utc
 EDDM_WIND_ADVECTION_MODEL_PATH = Path("data/models/eddm_metar_tmax_icon_d2_spatial_wind_advection_v1.joblib")
 EDDM_WIND_ADVECTION_METADATA_PATH = Path("data/models/eddm_metar_tmax_icon_d2_spatial_wind_advection_v1.metadata.json")
 EDDM_WIND_ADVECTION_VARIANT = "shadow_spatial_wind_advection"
-EDDM_WIND_ADVECTION_LOCAL_HOUR_START = 12
-EDDM_WIND_ADVECTION_LOCAL_HOUR_END = 18
 EDDM_UNIMODAL_VARIANT = "shadow_unimodal_pmf"
 EDDM_UNIMODAL_VERSION = "eddm_unimodal_projection_shadow_v1"
 
@@ -527,20 +525,17 @@ def _predict_eddm_wind_advection_candidate(
     champion,
 ) -> dict:
     local_hour = int(pd.Timestamp(issue_time_utc).tz_convert("Europe/Berlin").hour)
-    active_window = [EDDM_WIND_ADVECTION_LOCAL_HOUR_START, EDDM_WIND_ADVECTION_LOCAL_HOUR_END]
     base = {
         "enabled": airport.upper() == "EDDM",
         "active": False,
         "status": "shadow_only_does_not_affect_operational_forecast",
-        "active_local_hour_window": active_window,
+        "active_local_hour_window": "all_day",
         "local_issue_hour": local_hour,
         "model_version": None,
         "reason": None,
     }
     if airport.upper() != "EDDM":
         return {**base, "enabled": False, "reason": "airport_not_supported"}
-    if not (EDDM_WIND_ADVECTION_LOCAL_HOUR_START <= local_hour <= EDDM_WIND_ADVECTION_LOCAL_HOUR_END):
-        return {**base, "reason": "outside_spatial_wind_advection_local_hour_window"}
     if not EDDM_WIND_ADVECTION_MODEL_PATH.exists():
         return {**base, "reason": f"missing_model:{EDDM_WIND_ADVECTION_MODEL_PATH}"}
     try:
@@ -562,7 +557,7 @@ def _predict_eddm_wind_advection_candidate(
         return {
             **base,
             "active": True,
-            "reason": "active_midday_spatial_wind_advection_candidate",
+            "reason": "active_all_day_spatial_wind_advection_shadow",
             "model_version": metadata.get("model_version", getattr(model, "model_version", EDDM_WIND_ADVECTION_MODEL_PATH.stem)),
             "forecast": dist.to_payload(),
             "comparison_to_champion": _distribution_comparison(dist, champion),
