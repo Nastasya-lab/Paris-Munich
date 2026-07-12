@@ -57,6 +57,10 @@ HAZARD_SHADOW_VARIANT = "shadow_discrete_hazard"
 HF_ICON_EU_SHADOW_MODEL_PATH = Path("data/models/lfpb_hf_icon_eu_residual_pmf_shadow_v1.joblib")
 HF_ICON_EU_SHADOW_METADATA_PATH = Path("data/models/lfpb_hf_icon_eu_residual_pmf_shadow_v1.metadata.json")
 HF_ICON_EU_SHADOW_VARIANT = "shadow_hf_icon_eu"
+LONG_HISTORY_SHADOW_MODEL_PATH: Path | None = None
+LONG_HISTORY_SHADOW_METADATA_PATH: Path | None = None
+LONG_HISTORY_SHADOW_VARIANT = "shadow_long_history_icon_d2"
+LONG_HISTORY_SHADOW_ENABLED = False
 UNIMODAL_SHADOW_VARIANT = "shadow_unimodal_pmf"
 UNIMODAL_SHADOW_VERSION = "lfpb_pmf_temperature_unimodal_shadow_v1"
 UNIMODAL_SHADOW_TEMPERATURE = 0.67
@@ -133,6 +137,10 @@ def main() -> None:
         issue_time_utc=issue_time_utc,
         base_feature_row=feature_row,
     )
+    long_history_shadow_candidate = _predict_long_history_shadow_candidate(
+        enabled=args.long_history_shadow,
+        base_feature_row=feature_row,
+    )
     base_production_distribution = distribution
     base_production_model_version = metadata.get("model_version", "lfpb_metar_tmax_upside_v1")
     production_selection = {
@@ -163,6 +171,7 @@ def main() -> None:
     _update_candidate_comparison(spatial_candidate, distribution)
     _update_candidate_comparison(hazard_shadow_candidate, distribution)
     _update_candidate_comparison(hf_icon_eu_shadow_candidate, distribution)
+    _update_candidate_comparison(long_history_shadow_candidate, distribution)
     forecast_variants = _build_forecast_variants(
         distribution,
         production_model_version=production_model_version,
@@ -171,6 +180,7 @@ def main() -> None:
         spatial_candidate=spatial_candidate,
         hazard_shadow_candidate=hazard_shadow_candidate,
         hf_icon_eu_shadow_candidate=hf_icon_eu_shadow_candidate,
+        long_history_shadow_candidate=long_history_shadow_candidate,
     )
     nwp_source_diagnostics = _build_nwp_source_diagnostics(feature_row)
     previous_record = _latest_forecast_record(
@@ -203,6 +213,7 @@ def main() -> None:
                 "spatial_candidate": spatial_candidate,
                 "hazard_shadow_candidate": hazard_shadow_candidate,
                 "hf_icon_eu_shadow_candidate": hf_icon_eu_shadow_candidate,
+                "long_history_shadow_candidate": long_history_shadow_candidate,
                 "forecast_variants": forecast_variants,
                 "unimodal_shadow_candidate": unimodal_shadow_candidate,
             },
@@ -228,6 +239,7 @@ def main() -> None:
         "spatial_candidate": spatial_candidate,
         "hazard_shadow_candidate": hazard_shadow_candidate,
         "hf_icon_eu_shadow_candidate": hf_icon_eu_shadow_candidate,
+        "long_history_shadow_candidate": long_history_shadow_candidate,
         "forecast_variants": forecast_variants,
         "unimodal_shadow_candidate": unimodal_shadow_candidate,
         "metar_signal": {
@@ -607,6 +619,49 @@ def _predict_hf_icon_eu_shadow_candidate(
         return {**base, "reason": f"hf_icon_eu_shadow_unavailable:{exc}"}
 
 
+def _predict_long_history_shadow_candidate(*, enabled: bool, base_feature_row: dict) -> dict:
+    """Evaluate the EHAM long-history artifact without affecting production."""
+    base = {
+        "enabled": bool(enabled),
+        "active": False,
+        "status": "shadow_only_does_not_affect_operational_forecast",
+        "variant": LONG_HISTORY_SHADOW_VARIANT,
+        "model_version": None,
+        "reason": None,
+    }
+    if not enabled:
+        return {**base, "reason": "long_history_shadow_disabled"}
+    if LONG_HISTORY_SHADOW_MODEL_PATH is None or not LONG_HISTORY_SHADOW_MODEL_PATH.exists():
+        return {**base, "reason": f"missing_model:{LONG_HISTORY_SHADOW_MODEL_PATH}"}
+    try:
+        model = joblib.load(LONG_HISTORY_SHADOW_MODEL_PATH)
+        metadata = _load_json(LONG_HISTORY_SHADOW_METADATA_PATH) if LONG_HISTORY_SHADOW_METADATA_PATH else {}
+        raw_distribution = model.predict_distribution(base_feature_row)
+        distribution = project_unimodal_distribution(
+            temperature_scale_distribution(raw_distribution, UNIMODAL_SHADOW_TEMPERATURE)
+        )
+        return {
+            **base,
+            "active": True,
+            "reason": "active_long_history_icon_d2_shadow",
+            "model_version": metadata.get("model_version", getattr(model, "model_version", LONG_HISTORY_SHADOW_VARIANT)),
+            "forecast": distribution.to_payload(),
+            "forecast_before_unimodal_projection": raw_distribution.to_payload(),
+            "shape": _shape_summary(distribution),
+            "metadata": {
+                "variant_version": metadata.get("model_version", LONG_HISTORY_SHADOW_VARIANT),
+                "status": "shadow_only_does_not_affect_operational_forecast",
+                "training_source": metadata.get("training_source"),
+                "training_days": metadata.get("training_days"),
+                "training_period": metadata.get("training_period"),
+                "unimodal_temperature": UNIMODAL_SHADOW_TEMPERATURE,
+                "unimodal_violation_count": unimodal_violation_count(distribution),
+            },
+        }
+    except Exception as exc:
+        return {**base, "reason": f"long_history_shadow_unavailable:{exc}"}
+
+
 def _refresh_open_meteo_live(airport: str, target_date_local: date | None) -> dict:
     target = target_date_local or date.today()
     rows = fetch_open_meteo_live_extract(
@@ -830,6 +885,7 @@ def _build_forecast_variants(
     spatial_candidate: dict | None = None,
     hazard_shadow_candidate: dict | None = None,
     hf_icon_eu_shadow_candidate: dict | None = None,
+    long_history_shadow_candidate: dict | None = None,
 ) -> dict:
     local_issue_hour = _clean_optional_float(feature_row.get("local_issue_hour"))
     variants = {
@@ -872,6 +928,13 @@ def _build_forecast_variants(
             "description": f"{AIRPORT} HF ICON-EU residual PMF shadow distribution; diagnostic only.",
             "distribution": hf_icon_eu.get("forecast") or {},
             "metadata": hf_icon_eu.get("metadata") or {},
+        }
+    long_history = long_history_shadow_candidate or {}
+    if long_history.get("active") and long_history.get("forecast"):
+        variants[LONG_HISTORY_SHADOW_VARIANT] = {
+            "description": f"{AIRPORT} long-history ICON-D2 D-1 research candidate; diagnostic only.",
+            "distribution": long_history.get("forecast") or {},
+            "metadata": long_history.get("metadata") or {},
         }
     return variants
 def _build_unimodal_shadow_candidate(
@@ -1113,6 +1176,8 @@ def _format_lfpb_compact_message(payload: dict) -> str:
         "",
         *_format_lfpb_hf_icon_eu_compact_block(payload, variants, variant_changes.get(HF_ICON_EU_SHADOW_VARIANT)),
         "",
+        *_format_lfpb_long_history_compact_block(payload, variants, variant_changes.get(LONG_HISTORY_SHADOW_VARIANT)),
+        "",
         *_format_lfpb_short_summary(payload),
     ]
     return "\n".join(line for line in lines if line is not None).strip()
@@ -1217,11 +1282,39 @@ def _format_lfpb_hf_icon_eu_compact_block(payload: dict, variants: dict, change:
     return _format_lfpb_model_block("HF ICON-EU shadow", str(model_version), forecast, change, extra)
 
 
+def _format_lfpb_long_history_compact_block(payload: dict, variants: dict, change: dict | None) -> list[str]:
+    candidate = payload.get("long_history_shadow_candidate") or {}
+    shadow = variants.get(LONG_HISTORY_SHADOW_VARIANT) or {}
+    if not candidate.get("enabled", False):
+        return []
+    forecast = candidate.get("forecast") or shadow.get("distribution") or {}
+    if not candidate.get("active", False) or not forecast.get("probabilities_by_integer_c"):
+        return [
+            "<b>Long-history ICON-D2 shadow</b>",
+            f"Status: inactive ({candidate.get('reason') or 'unknown'})",
+        ]
+    metadata = candidate.get("metadata") or shadow.get("metadata") or {}
+    comparison = candidate.get("comparison_to_champion") or {}
+    extra = [
+        f"Training days: {metadata.get('training_days', 'n/a')}",
+        f"Expected vs working: {_fmt_delta(comparison.get('expected_tmax_delta_c'))}",
+        f"Shape violations: {metadata.get('unimodal_violation_count', 'n/a')}",
+    ]
+    return _format_lfpb_model_block(
+        "Long-history ICON-D2 shadow",
+        str(candidate.get("model_version") or metadata.get("variant_version") or LONG_HISTORY_SHADOW_VARIANT),
+        forecast,
+        change,
+        extra,
+    )
+
+
 def _format_lfpb_short_summary(payload: dict) -> list[str]:
     forecast = payload.get("forecast") or {}
     wind = ((payload.get("spatial_candidate") or {}).get("forecast") or {})
     hazard = ((payload.get("hazard_shadow_candidate") or {}).get("forecast") or {})
     hf_icon_eu = ((payload.get("hf_icon_eu_shadow_candidate") or {}).get("forecast") or {})
+    long_history = ((payload.get("long_history_shadow_candidate") or {}).get("forecast") or {})
     signal = payload.get("metar_signal") or {}
     lines = [
         "<b>Кратко</b>",
@@ -1230,6 +1323,8 @@ def _format_lfpb_short_summary(payload: dict) -> list[str]:
         f"Discrete hazard: {_format_lfpb_bin(hazard.get('most_likely_integer_c'))}",
         f"HF ICON-EU: {_format_lfpb_bin(hf_icon_eu.get('most_likely_integer_c'))}",
     ]
+    if (payload.get("long_history_shadow_candidate") or {}).get("enabled"):
+        lines.append(f"Long history: {_format_lfpb_bin(long_history.get('most_likely_integer_c'))}")
     if signal.get("latest_metar_temp_c") is not None:
         lines.append(f"Последний METAR: {float(signal.get('latest_metar_temp_c')):.1f} °C")
     return lines
@@ -1519,6 +1614,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--promote-spatial-candidate", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--hazard-shadow", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--hf-icon-eu-shadow", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--long-history-shadow", action=argparse.BooleanOptionalAction, default=LONG_HISTORY_SHADOW_ENABLED)
     parser.add_argument("--report-path", default="data/reports/latest_lfpb_metar_tmax_prediction.json")
     return parser.parse_args()
 
