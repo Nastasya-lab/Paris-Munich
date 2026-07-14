@@ -1,0 +1,21 @@
+services:
+  weather-tmax-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: weather-tmax-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8000"
+      WEATHER_TMAX_DATA_DIR: /app/data
+      WEATHER_TMAX_SEED_DATA_DIR: /app/seed_data
+      WEATHER_TMAX_EMBEDDED_SCHEDULER: "1"
+    ports:
+      - "127.0.0.1:8080:8000"
+    volumes:
+      - weather_tmax_runtime:/app/data
+
+volumes:
+  weather_tmax_runtime:
