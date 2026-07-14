@@ -8,6 +8,7 @@ services:
     env_file:
       - .env
     environment:
+      HOST: 0.0.0.0
       PORT: "8000"
       WEATHER_TMAX_DATA_DIR: /app/data
       WEATHER_TMAX_SEED_DATA_DIR: /app/seed_data
