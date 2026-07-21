@@ -43,6 +43,15 @@ def main() -> None:
                     args.issue_time,
                 ],
             ),
+            _run_step(
+                "LEMD forecast",
+                [
+                    sys.executable,
+                    "scripts/116_lemd_forecast_job.py",
+                    "--issue-time",
+                    args.issue_time,
+                ],
+            ),
         ]
     elif args.job == "metar-event-all-once":
         results = [
@@ -82,6 +91,15 @@ def main() -> None:
                     args.issue_time,
                     "--poll-timeout-seconds",
                     "0",
+                ],
+            ),
+            _run_step(
+                "LEMD METAR once",
+                [
+                    sys.executable,
+                    "scripts/117_lemd_metar_event_job.py",
+                    "--issue-time",
+                    args.issue_time,
                 ],
             ),
         ]

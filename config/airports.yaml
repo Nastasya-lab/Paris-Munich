@@ -49,3 +49,17 @@ airports:
       longitude: 4.7639
       elevation_m: -3
       source_id: iem.metar.archive.EHAM
+  LEMD:
+    name: Adolfo Suarez Madrid-Barajas Airport
+    timezone: Europe/Madrid
+    latitude: 40.4722
+    longitude: -3.5608
+    elevation_m: 610
+    truth_station:
+      provider: METAR
+      station_id: LEMD
+      station_name: Madrid-Barajas
+      latitude: 40.4722
+      longitude: -3.5608
+      elevation_m: 610
+      source_id: iem.metar.archive.LEMD

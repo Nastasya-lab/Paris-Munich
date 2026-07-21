@@ -12,6 +12,8 @@ def test_railway_entrypoint_routes_service_names_to_jobs():
     assert resolve_job("daily-report-cron") == "daily-report"
     assert resolve_job("scheduler-health-cron") == "health"
     assert resolve_job("whatever", explicit_job="forecast") == "forecast"
+    assert resolve_job("madrid-forecast") == "lemd-forecast"
+    assert resolve_job("LEMD-metar") == "lemd-metar-event"
 
 
 def test_railway_entrypoint_builds_metar_polling_command(monkeypatch):
