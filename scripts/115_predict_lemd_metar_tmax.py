@@ -15,6 +15,7 @@ import pandas as pd
 from weather_tmax_bot.data.previous_runs import build_previous_day1_snapshots, fetch_previous_day1_hourly
 from weather_tmax_bot.features.metar_upside_dataset import build_current_metar_upside_features
 from weather_tmax_bot.models.multinwp_tmax import LEMD_NWP_MODELS, blend_nwp_features
+from weather_tmax_bot.models.distribution import project_unimodal_distribution
 from weather_tmax_bot.notifications.telegram import notify_if_configured
 from weather_tmax_bot.operations.refresh import refresh_awc_live
 
@@ -29,7 +30,8 @@ METAR_PATH = Path("data/forecasts/awc_metar_live_LEMD.parquet")
 REPORT_PATH = Path("data/reports/latest_lemd_multinwp_prediction.json")
 HISTORY_PATH = Path("data/logs/lemd_forecast_history.jsonl")
 LIVE_CACHE_DIR = Path("data/cache/lemd_previous_day1_live")
-SUPPORTED_LOCAL_HOURS = range(6, 21)
+TRAINED_LOCAL_HOUR_MIN = 6
+TRAINED_LOCAL_HOUR_MAX = 20
 
 
 def main() -> None:
@@ -38,16 +40,8 @@ def main() -> None:
     target = date.fromisoformat(args.target_date) if args.target_date else issue.astimezone(ZoneInfo(TIMEZONE)).date()
     if issue.astimezone(ZoneInfo(TIMEZONE)).date() != target:
         raise ValueError("LEMD live forecast currently supports the current local day only")
-    local_hour = issue.astimezone(ZoneInfo(TIMEZONE)).hour
-    if local_hour not in SUPPORTED_LOCAL_HOURS:
-        payload = {
-            "airport": AIRPORT,
-            "status": "outside_trained_local_hour_window",
-            "supported_local_hours": [min(SUPPORTED_LOCAL_HOURS), max(SUPPORTED_LOCAL_HOURS)],
-            "issue_time_utc": issue.isoformat(),
-        }
-        print(json.dumps(payload, indent=2))
-        return
+    actual_local_hour = issue.astimezone(ZoneInfo(TIMEZONE)).hour
+    model_local_hour, forecast_mode = forecast_mode_for_hour(actual_local_hour)
 
     refresh = refresh_awc_live(AIRPORT)
     metar = pd.read_parquet(METAR_PATH)
@@ -58,8 +52,15 @@ def main() -> None:
         issue_time_utc=issue,
         timezone_name=TIMEZONE,
     )
-    nwp_features, nwp_errors = load_live_nwp_features(target, issue, cache_dir=LIVE_CACHE_DIR)
+    nwp_features, nwp_errors = load_live_nwp_features(
+        target,
+        issue,
+        cache_dir=LIVE_CACHE_DIR,
+        model_local_hour=model_local_hour,
+    )
     feature_row.update(nwp_features)
+    feature_row["actual_local_issue_hour"] = actual_local_hour
+    feature_row["local_issue_hour"] = float(model_local_hour)
     feature_row["month"] = target.month
     day_of_year = target.timetuple().tm_yday
     feature_row["doy_sin"] = float(np.sin(2 * np.pi * day_of_year / 366.0))
@@ -73,8 +74,18 @@ def main() -> None:
             f"LEMD forecast requires at least {source_status['minimum_required']} NWP sources; "
             f"available={source_status['available_models']}, errors={nwp_errors}"
         )
-    distribution = model.predict_distribution(feature_row)
     blend = blend_nwp_features(feature_row, model.nwp_weights, prefixes=model.nwp_prefixes)
+    if forecast_mode == "early_nwp_residual":
+        residual_row = dict(feature_row)
+        residual_row.update(blend)
+        current_max = float(residual_row["current_metar_max_c"])
+        residual_row["nwp_model_minus_current_max_c"] = float(residual_row["model_tmax_c"] - current_max)
+        residual_row["nwp_future_minus_current_max_c"] = float(
+            residual_row["model_future_temp_max_c"] - current_max
+        )
+        distribution = project_unimodal_distribution(model.ensemble.residual_distribution(residual_row))
+    else:
+        distribution = model.predict_distribution(feature_row)
     payload = {
         "airport": AIRPORT,
         "city": "Madrid",
@@ -83,6 +94,9 @@ def main() -> None:
         "issue_time_utc": issue.isoformat(),
         "issue_time_local": issue.astimezone(ZoneInfo(TIMEZONE)).isoformat(),
         "update_trigger": args.update_trigger,
+        "forecast_mode": forecast_mode,
+        "actual_local_issue_hour": actual_local_hour,
+        "model_local_issue_hour": model_local_hour,
         "model_version": model.model_version,
         "forecast": distribution.to_payload(),
         "latest_metar_record": {
@@ -114,13 +128,19 @@ def main() -> None:
     print(json.dumps(payload, indent=2, default=str))
 
 
-def load_live_nwp_features(target: date, issue: datetime, *, cache_dir: Path) -> tuple[dict, dict]:
+def load_live_nwp_features(
+    target: date,
+    issue: datetime,
+    *,
+    cache_dir: Path,
+    model_local_hour: int | None = None,
+) -> tuple[dict, dict]:
     cache_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, dict] = {}
     errors: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=len(LEMD_NWP_MODELS)) as pool:
         futures = {
-            pool.submit(_load_one_model, model, prefix, target, issue, cache_dir): (model, prefix)
+            pool.submit(_load_one_model, model, prefix, target, issue, cache_dir, model_local_hour): (model, prefix)
             for model, prefix in LEMD_NWP_MODELS.items()
         }
         for future in as_completed(futures):
@@ -135,7 +155,14 @@ def load_live_nwp_features(target: date, issue: datetime, *, cache_dir: Path) ->
     return features, errors
 
 
-def _load_one_model(model: str, prefix: str, target: date, issue: datetime, cache_dir: Path) -> dict:
+def _load_one_model(
+    model: str,
+    prefix: str,
+    target: date,
+    issue: datetime,
+    cache_dir: Path,
+    model_local_hour: int | None,
+) -> dict:
     hourly = fetch_previous_day1_hourly(
         latitude=LATITUDE,
         longitude=LONGITUDE,
@@ -145,7 +172,7 @@ def _load_one_model(model: str, prefix: str, target: date, issue: datetime, cach
         cache_dir=cache_dir,
         chunk_days=2,
     )
-    local_hour = issue.astimezone(ZoneInfo(TIMEZONE)).hour
+    local_hour = model_local_hour if model_local_hour is not None else issue.astimezone(ZoneInfo(TIMEZONE)).hour
     snapshots = build_previous_day1_snapshots(
         hourly,
         timezone_name=TIMEZONE,
@@ -165,6 +192,11 @@ def format_forecast_message(payload: dict) -> str:
     local_issue = pd.Timestamp(payload["issue_time_local"]).strftime("%d.%m.%Y %H:%M")
     metar_time = pd.Timestamp(metar["observation_time_utc"]).tz_convert(TIMEZONE).strftime("%d.%m.%Y %H:%M")
     trigger = "новый METAR" if payload["update_trigger"] == "new_metar" else "плановый выпуск"
+    mode_labels = {
+        "trained_intraday": "основной обученный intraday-режим",
+        "late_clamped_intraday": "поздний режим: временной профиль 20:00",
+        "early_nwp_residual": "ранний режим: консервативная NWP-residual PMF",
+    }
     lines = [
         "<b>LEMD Madrid Tmax forecast</b>",
         f"Дата прогноза: <b>{html.escape(payload['target_date_local'])}</b>",
@@ -172,6 +204,7 @@ def format_forecast_message(payload: dict) -> str:
         "",
         "<b>Источник обновления</b>",
         f"Триггер: {trigger}",
+        f"Режим: {mode_labels.get(payload.get('forecast_mode'), payload.get('forecast_mode'))}",
         "",
         "<b>Использованный METAR</b>",
         f"Время: {metar_time} по Мадриду",
@@ -199,6 +232,14 @@ def format_forecast_message(payload: dict) -> str:
     if nwp["degraded"]:
         lines.append(f"Статус источников: ограниченный ({', '.join(nwp['available_models'])})")
     return "\n".join(lines)
+
+
+def forecast_mode_for_hour(local_hour: int) -> tuple[int, str]:
+    if local_hour < TRAINED_LOCAL_HOUR_MIN:
+        return TRAINED_LOCAL_HOUR_MIN, "early_nwp_residual"
+    if local_hour > TRAINED_LOCAL_HOUR_MAX:
+        return TRAINED_LOCAL_HOUR_MAX, "late_clamped_intraday"
+    return int(local_hour), "trained_intraday"
 
 
 def _write_report(payload: dict, report_path: str | Path) -> None:

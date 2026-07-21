@@ -112,12 +112,14 @@ def test_lemd_message_identifies_trigger_and_nwp_sources() -> None:
     assert "ARPEGE Europe" in text
 
 
-def test_lemd_supported_window_uses_trained_hours() -> None:
+def test_lemd_forecast_modes_cover_full_day() -> None:
     module = _predictor_module()
 
-    assert 6 in module.SUPPORTED_LOCAL_HOURS
-    assert 20 in module.SUPPORTED_LOCAL_HOURS
-    assert 21 not in module.SUPPORTED_LOCAL_HOURS
+    assert module.forecast_mode_for_hour(2) == (6, "early_nwp_residual")
+    assert module.forecast_mode_for_hour(6) == (6, "trained_intraday")
+    assert module.forecast_mode_for_hour(15) == (15, "trained_intraday")
+    assert module.forecast_mode_for_hour(20) == (20, "trained_intraday")
+    assert module.forecast_mode_for_hour(22) == (20, "late_clamped_intraday")
 
 
 def test_lemd_telegram_prefers_main_bot_over_paris_bot(monkeypatch) -> None:

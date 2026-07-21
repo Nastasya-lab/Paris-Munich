@@ -6,7 +6,9 @@
 - Intraday state: LEMD METAR observations known by the issue time.
 - NWP state: Open-Meteo Previous Runs `previous_day1`, a fixed 24-hour lead trajectory known by local day start.
 - NWP providers: DWD ICON-EU, ECMWF IFS 0.25, NCEP GFS Global and Meteo-France ARPEGE Europe.
-- Supported live issue hours: 06:00 through 20:59 local.
+- Full intraday model: 06:00 through 20:59 local. Earlier updates use the D-1
+  residual PMF; later updates use the trained 20:00 time profile with the
+  latest observed METAR maximum.
 - Runtime requires at least two available NWP providers and renormalizes the trained weights over available providers.
 
 ## Data
