@@ -29,8 +29,8 @@ def main() -> None:
 def _activate_telegram() -> None:
     token = (
         os.getenv("TELEGRAM_BOT_TOKEN_LEMD")
-        or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
         or os.getenv("TELEGRAM_BOT_TOKEN")
+        or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
     )
     if token:
         os.environ["TELEGRAM_BOT_TOKEN"] = token

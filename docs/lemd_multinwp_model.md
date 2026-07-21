@@ -58,5 +58,5 @@ predicts the PMF, stores JSON/JSONL history and optionally sends Telegram.
 embedded scheduler invokes Madrid through the existing multi-airport jobs.
 
 The Telegram chat defaults to `-1004409683948`. The token lookup order is
-`TELEGRAM_BOT_TOKEN_LEMD`, `TELEGRAM_BOT_TOKEN_LFPB`, then
-`TELEGRAM_BOT_TOKEN`.
+`TELEGRAM_BOT_TOKEN_LEMD`, `TELEGRAM_BOT_TOKEN`, then
+`TELEGRAM_BOT_TOKEN_LFPB`.

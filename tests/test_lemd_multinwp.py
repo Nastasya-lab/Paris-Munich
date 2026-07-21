@@ -22,6 +22,16 @@ def _predictor_module():
     return module
 
 
+def _forecast_job_module():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "116_lemd_forecast_job.py"
+    spec = importlib.util.spec_from_file_location("test_lemd_forecast_job", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_blend_nwp_features_renormalizes_missing_provider() -> None:
     row = {
         "icon_eu_tmax_c": 30.0,
@@ -108,3 +118,16 @@ def test_lemd_supported_window_uses_trained_hours() -> None:
     assert 6 in module.SUPPORTED_LOCAL_HOURS
     assert 20 in module.SUPPORTED_LOCAL_HOURS
     assert 21 not in module.SUPPORTED_LOCAL_HOURS
+
+
+def test_lemd_telegram_prefers_main_bot_over_paris_bot(monkeypatch) -> None:
+    module = _forecast_job_module()
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN_LEMD", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "main-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN_LFPB", "paris-token")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID_LEMD", raising=False)
+
+    module._activate_telegram()
+
+    assert module.os.environ["TELEGRAM_BOT_TOKEN"] == "main-token"
+    assert module.os.environ["TELEGRAM_CHAT_ID"] == "-1004409683948"
