@@ -72,6 +72,7 @@ def build_spatial_metar_features(
     issue_time_utc,
     timezone_name: str,
     stations: list[str] | tuple[str, ...] = DEFAULT_SPATIAL_STATIONS,
+    _metars_prepared: bool = False,
 ) -> dict:
     issue = pd.Timestamp(issue_time_utc).tz_convert("UTC")
     features: dict[str, float | int | bool | str | None] = {}
@@ -84,8 +85,9 @@ def build_spatial_metar_features(
 
     for station in stations:
         prefix = f"spatial_{station.lower()}"
+        station_frame = neighbor_metars.get(station, pd.DataFrame())
         station_features, station_latest, station_max, station_knowledge = _station_features(
-            _prepare_metar(neighbor_metars.get(station, pd.DataFrame())),
+            station_frame if _metars_prepared else _prepare_metar(station_frame),
             issue_time_utc=issue,
             target_date_local=target_date_local,
             timezone_name=timezone_name,
@@ -146,6 +148,7 @@ def add_spatial_metar_features_to_frame(
             issue_time_utc=row["issue_time_utc"],
             timezone_name=timezone_name,
             stations=stations,
+            _metars_prepared=True,
         )
         for _, row in out.iterrows()
     ]

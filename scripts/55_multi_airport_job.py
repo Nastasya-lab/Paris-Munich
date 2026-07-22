@@ -61,6 +61,15 @@ def main() -> None:
                     args.issue_time,
                 ],
             ),
+            _run_step(
+                "RCSS forecast",
+                [
+                    sys.executable,
+                    "scripts/124_rcss_forecast_job.py",
+                    "--issue-time",
+                    args.issue_time,
+                ],
+            ),
         ]
     elif args.job == "metar-event-all-once":
         results = [
@@ -116,6 +125,15 @@ def main() -> None:
                 [
                     sys.executable,
                     "scripts/121_limc_metar_event_job.py",
+                    "--issue-time",
+                    args.issue_time,
+                ],
+            ),
+            _run_step(
+                "RCSS METAR once",
+                [
+                    sys.executable,
+                    "scripts/125_rcss_metar_event_job.py",
                     "--issue-time",
                     args.issue_time,
                 ],

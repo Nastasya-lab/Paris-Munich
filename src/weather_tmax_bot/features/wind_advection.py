@@ -130,6 +130,7 @@ def build_wind_advection_features(
     timezone_name: str,
     stations: list[str] | tuple[str, ...] = DEFAULT_ADVECTION_STATIONS,
     target_station: str = "LFPB",
+    _metars_prepared: bool = False,
 ) -> dict:
     issue = pd.Timestamp(issue_time_utc).tz_convert("UTC")
     features: dict[str, float | int | bool | str] = {}
@@ -139,8 +140,9 @@ def build_wind_advection_features(
     station_codes = [station.upper() for station in stations]
     for station in station_codes:
         prefix = f"adv_{station.lower()}"
+        station_frame = station_metars.get(station, pd.DataFrame())
         station_features, summary, station_knowledge = _station_advection_features(
-            _prepare_metar(station_metars.get(station, pd.DataFrame())),
+            station_frame if _metars_prepared else _prepare_metar(station_frame),
             issue_time_utc=issue,
             target_date_local=target_date_local,
             timezone_name=timezone_name,
@@ -202,6 +204,7 @@ def add_wind_advection_features_to_frame(
             timezone_name=timezone_name,
             stations=station_codes,
             target_station=target_station,
+            _metars_prepared=True,
         )
         for _, row in out.iterrows()
     ]

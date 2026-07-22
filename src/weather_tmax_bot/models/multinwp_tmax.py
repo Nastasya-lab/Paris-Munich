@@ -19,6 +19,13 @@ LEMD_NWP_MODELS = {
     "meteofrance_arpege_europe": "arpege",
 }
 
+RCSS_NWP_MODELS = {
+    "jma_msm": "jma_msm",
+    "jma_gsm": "jma_gsm",
+    "icon_global": "icon_global",
+    "ecmwf_ifs025": "ecmwf",
+}
+
 NWP_AGGREGATES = (
     "tmax_c",
     "future_temp_max_c",
@@ -95,6 +102,7 @@ class MultiNwpMetarTmaxModel:
     unimodal_temperature: float = 0.67
     minimum_nwp_models: int = 2
     residual_nwp_prefix: str | None = None
+    enforce_minimum_with_residual_prefix: bool = False
 
     def predict_distribution(self, feature_row: dict | pd.Series) -> TmaxDistribution:
         row = dict(feature_row)
@@ -124,7 +132,12 @@ class MultiNwpMetarTmaxModel:
             if _finite(dict(feature_row).get(f"{prefix}_tmax_c"))
         ]
         required_prefixes = [self.residual_nwp_prefix] if self.residual_nwp_prefix else []
-        minimum_required = 1 if required_prefixes else self.minimum_nwp_models
+        enforce_minimum = getattr(self, "enforce_minimum_with_residual_prefix", False)
+        minimum_required = (
+            self.minimum_nwp_models
+            if not required_prefixes or enforce_minimum
+            else 1
+        )
         required_available = all(prefix in available for prefix in required_prefixes)
         return {
             "available_models": available,
@@ -145,6 +158,11 @@ class MultiNwpMetarTmaxModel:
             "unimodal_temperature": self.unimodal_temperature,
             "minimum_nwp_models": self.minimum_nwp_models,
             "residual_nwp_prefix": self.residual_nwp_prefix,
+            "enforce_minimum_with_residual_prefix": getattr(
+                self,
+                "enforce_minimum_with_residual_prefix",
+                False,
+            ),
         }
 
 

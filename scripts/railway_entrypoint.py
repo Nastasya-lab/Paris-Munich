@@ -25,6 +25,8 @@ def resolve_job(service_name: str | None, explicit_job: str | None = None) -> st
     if "metar" in normalized and "cron" in normalized:
         if "limc" in normalized or "milan" in normalized:
             return "limc-metar-event"
+        if "rcss" in normalized or "taipei" in normalized:
+            return "rcss-metar-event"
         if "lemd" in normalized or "madrid" in normalized:
             return "lemd-metar-event"
         if "eham" in normalized or "amsterdam" in normalized:
@@ -35,6 +37,8 @@ def resolve_job(service_name: str | None, explicit_job: str | None = None) -> st
     if "forecast" in normalized and "cron" in normalized:
         if "limc" in normalized or "milan" in normalized:
             return "limc-forecast"
+        if "rcss" in normalized or "taipei" in normalized:
+            return "rcss-forecast"
         if "lemd" in normalized or "madrid" in normalized:
             return "lemd-forecast"
         if "eham" in normalized or "amsterdam" in normalized:
@@ -54,6 +58,10 @@ def resolve_job(service_name: str | None, explicit_job: str | None = None) -> st
         return "limc-metar-event"
     if ("limc" in normalized or "milan" in normalized) and "forecast" in normalized:
         return "limc-forecast"
+    if ("rcss" in normalized or "taipei" in normalized) and "metar" in normalized:
+        return "rcss-metar-event"
+    if ("rcss" in normalized or "taipei" in normalized) and "forecast" in normalized:
+        return "rcss-forecast"
     if "lfpb" in normalized and "metar" in normalized:
         return "lfpb-metar-event"
     if "lfpb" in normalized and "forecast" in normalized:
@@ -102,6 +110,10 @@ def build_api_job_command(job: str) -> list[str]:
         return [sys.executable, "scripts/120_limc_forecast_job.py"]
     if job == "limc-metar-event":
         return [sys.executable, "scripts/121_limc_metar_event_job.py"]
+    if job == "rcss-forecast":
+        return [sys.executable, "scripts/124_rcss_forecast_job.py"]
+    if job == "rcss-metar-event":
+        return [sys.executable, "scripts/125_rcss_metar_event_job.py"]
     command = [sys.executable, "scripts/33_call_api_job.py", job]
     if job == "metar-event":
         command.extend(
