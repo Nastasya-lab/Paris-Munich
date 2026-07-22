@@ -56,6 +56,22 @@ AIRPORT_SPECS = {
         "metar_path": "data/forecasts/awc_metar_live_EHAM.parquet",
         "station_markers": ("eham", "amsterdam", "schiphol"),
     },
+    "LEMD": {
+        "city_name": "Madrid",
+        "timezone": "Europe/Madrid",
+        "env_prefix": "LEMD",
+        "report_path": "data/reports/latest_lemd_multinwp_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_LEMD.parquet",
+        "station_markers": ("lemd", "madrid", "barajas"),
+    },
+    "LIMC": {
+        "city_name": "Milan",
+        "timezone": "Europe/Rome",
+        "env_prefix": "LIMC",
+        "report_path": "data/reports/latest_limc_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_LIMC.parquet",
+        "station_markers": ("limc", "milan", "malpensa"),
+    },
 }
 
 
@@ -295,6 +311,12 @@ def _activate_airport_telegram(airport: str) -> None:
     if airport == "EHAM":
         token = token or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
         chat_id = chat_id or "-1004216691526"
+    elif airport == "LEMD":
+        token = token or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
+        chat_id = chat_id or "-1004409683948"
+    elif airport == "LIMC":
+        token = token or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
+        chat_id = chat_id or "-1004371899833"
     if token:
         os.environ["TELEGRAM_BOT_TOKEN"] = token
     if chat_id:

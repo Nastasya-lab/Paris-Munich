@@ -78,6 +78,21 @@ def test_limc_telegram_uses_requested_chat_and_main_bot(monkeypatch) -> None:
     assert module.os.environ["TELEGRAM_CHAT_ID"] == "-1004371899833"
 
 
+def test_limc_forecast_job_runs_isolated_paper_trader(monkeypatch) -> None:
+    module = _load_script("120_limc_forecast_job.py", "test_limc_forecast_job_trading")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Completed", (), {"stdout": "", "stderr": "", "returncode": 0})()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    module._run_polymarket_paper()
+
+    assert calls[0][0][-3:] == ["--airport", "LIMC", "--notify"]
+    assert calls[0][1]["check"] is False
+
+
 def test_single_provider_wrapper_requires_selected_provider() -> None:
     model = MultiNwpMetarTmaxModel(
         ensemble=object(),

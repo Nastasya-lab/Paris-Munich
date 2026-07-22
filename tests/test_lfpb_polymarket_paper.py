@@ -159,6 +159,53 @@ def test_config_uses_isolated_airport_prefixes(monkeypatch, tmp_path):
     assert config.signal_variant == "production_champion"
 
 
+def test_new_airports_have_isolated_production_trading_specs(monkeypatch):
+    paper_job = _load_paper_job_module()
+
+    assert paper_job.AIRPORT_SPECS["LEMD"] == {
+        "city_name": "Madrid",
+        "timezone": "Europe/Madrid",
+        "env_prefix": "LEMD",
+        "report_path": "data/reports/latest_lemd_multinwp_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_LEMD.parquet",
+        "station_markers": ("lemd", "madrid", "barajas"),
+    }
+    assert paper_job.AIRPORT_SPECS["LIMC"] == {
+        "city_name": "Milan",
+        "timezone": "Europe/Rome",
+        "env_prefix": "LIMC",
+        "report_path": "data/reports/latest_limc_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_LIMC.parquet",
+        "station_markers": ("limc", "milan", "malpensa"),
+    }
+
+    for airport in ("LEMD", "LIMC"):
+        config = PaperTradingConfig.from_env(airport)
+        assert config.signal_variant == "production_champion"
+        assert config.allow_yes_positions is False
+        assert config.signal_confirmations_required == 2
+        assert config.max_positions == 5
+        assert config.state_path.name == f"{airport.lower()}_paper_state.json"
+        assert config.decision_log_path.name == f"{airport.lower()}_paper_decisions.jsonl"
+
+
+@pytest.mark.parametrize(
+    ("airport", "chat_id"),
+    [("LEMD", "-1004409683948"), ("LIMC", "-1004371899833")],
+)
+def test_new_airport_trading_telegram_routing(monkeypatch, airport, chat_id):
+    paper_job = _load_paper_job_module()
+    monkeypatch.delenv(f"TELEGRAM_BOT_TOKEN_{airport}", raising=False)
+    monkeypatch.delenv(f"TELEGRAM_CHAT_ID_{airport}", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "main-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN_LFPB", "paris-token")
+
+    paper_job._activate_airport_telegram(airport)
+
+    assert paper_job.os.environ["TELEGRAM_BOT_TOKEN"] == "main-token"
+    assert paper_job.os.environ["TELEGRAM_CHAT_ID"] == chat_id
+
+
 def test_forecast_loader_supports_flat_operational_airport_report(tmp_path):
     path = tmp_path / "eddm.json"
     path.write_text(

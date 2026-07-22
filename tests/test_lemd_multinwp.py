@@ -133,3 +133,18 @@ def test_lemd_telegram_prefers_main_bot_over_paris_bot(monkeypatch) -> None:
 
     assert module.os.environ["TELEGRAM_BOT_TOKEN"] == "main-token"
     assert module.os.environ["TELEGRAM_CHAT_ID"] == "-1004409683948"
+
+
+def test_lemd_forecast_job_runs_isolated_paper_trader(monkeypatch) -> None:
+    module = _forecast_job_module()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Completed", (), {"stdout": "", "stderr": "", "returncode": 0})()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    module._run_polymarket_paper()
+
+    assert calls[0][0][-3:] == ["--airport", "LEMD", "--notify"]
+    assert calls[0][1]["check"] is False
