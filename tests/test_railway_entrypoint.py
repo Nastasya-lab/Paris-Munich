@@ -14,6 +14,17 @@ def test_railway_entrypoint_routes_service_names_to_jobs():
     assert resolve_job("whatever", explicit_job="forecast") == "forecast"
     assert resolve_job("madrid-forecast") == "lemd-forecast"
     assert resolve_job("LEMD-metar") == "lemd-metar-event"
+    assert resolve_job("milan-forecast") == "limc-forecast"
+    assert resolve_job("LIMC-metar") == "limc-metar-event"
+
+    assert build_api_job_command("limc-forecast") == [
+        sys.executable,
+        "scripts/120_limc_forecast_job.py",
+    ]
+    assert build_api_job_command("limc-metar-event") == [
+        sys.executable,
+        "scripts/121_limc_metar_event_job.py",
+    ]
 
 
 def test_railway_entrypoint_builds_metar_polling_command(monkeypatch):

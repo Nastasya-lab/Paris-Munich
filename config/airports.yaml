@@ -63,3 +63,17 @@ airports:
       longitude: -3.5608
       elevation_m: 610
       source_id: iem.metar.archive.LEMD
+  LIMC:
+    name: Milan Malpensa Airport
+    timezone: Europe/Rome
+    latitude: 45.6306
+    longitude: 8.7281
+    elevation_m: 234
+    truth_station:
+      provider: METAR
+      station_id: LIMC
+      station_name: Milan Malpensa
+      latitude: 45.6306
+      longitude: 8.7281
+      elevation_m: 234
+      source_id: iem.metar.archive.LIMC

@@ -123,12 +123,16 @@ class MultiNwpMetarTmaxModel:
             for prefix in self.nwp_prefixes
             if _finite(dict(feature_row).get(f"{prefix}_tmax_c"))
         ]
+        required_prefixes = [self.residual_nwp_prefix] if self.residual_nwp_prefix else []
+        minimum_required = 1 if required_prefixes else self.minimum_nwp_models
+        required_available = all(prefix in available for prefix in required_prefixes)
         return {
             "available_models": available,
             "available_model_count": len(available),
-            "minimum_required": self.minimum_nwp_models,
+            "minimum_required": minimum_required,
+            "required_models": required_prefixes,
             "degraded": len(available) < len(self.nwp_prefixes),
-            "usable": len(available) >= self.minimum_nwp_models,
+            "usable": required_available and len(available) >= minimum_required,
         }
 
     def to_metadata(self) -> dict:
