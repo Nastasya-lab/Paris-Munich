@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import joblib
@@ -109,7 +110,36 @@ def test_rcss_telegram_uses_requested_chat_and_main_bot(monkeypatch) -> None:
 
     assert module.os.environ["TELEGRAM_BOT_TOKEN"] == "main-token"
     assert module.os.environ["TELEGRAM_CHAT_ID"] == "-1004469237763"
-    assert not hasattr(module, "_run_polymarket_paper")
+    assert hasattr(module, "_run_polymarket_paper")
+
+
+def test_rcss_forecast_job_runs_isolated_paper_trader(monkeypatch) -> None:
+    module = _load_script("124_rcss_forecast_job.py", "test_rcss_forecast_job_trader")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    module._run_polymarket_paper()
+
+    assert calls == [
+        (
+            [
+                module.sys.executable,
+                "scripts/83_lfpb_polymarket_paper_job.py",
+                "--airport",
+                "RCSS",
+                "--notify",
+            ],
+            {
+                "check": False,
+                "text": True,
+                "capture_output": True,
+            },
+        )
+    ]
 
 
 def test_multi_airport_scheduler_includes_rcss_without_replacing_other_cities(

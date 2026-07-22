@@ -178,8 +178,16 @@ def test_new_airports_have_isolated_production_trading_specs(monkeypatch):
         "metar_path": "data/forecasts/awc_metar_live_LIMC.parquet",
         "station_markers": ("limc", "milan", "malpensa"),
     }
+    assert paper_job.AIRPORT_SPECS["RCSS"] == {
+        "city_name": "Taipei",
+        "timezone": "Asia/Taipei",
+        "env_prefix": "RCSS",
+        "report_path": "data/reports/latest_rcss_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_RCSS.parquet",
+        "station_markers": ("rcss", "taipei", "songshan"),
+    }
 
-    for airport in ("LEMD", "LIMC"):
+    for airport in ("LEMD", "LIMC", "RCSS"):
         config = PaperTradingConfig.from_env(airport)
         assert config.signal_variant == "production_champion"
         assert config.allow_yes_positions is False
@@ -191,7 +199,11 @@ def test_new_airports_have_isolated_production_trading_specs(monkeypatch):
 
 @pytest.mark.parametrize(
     ("airport", "chat_id"),
-    [("LEMD", "-1004409683948"), ("LIMC", "-1004371899833")],
+    [
+        ("LEMD", "-1004409683948"),
+        ("LIMC", "-1004371899833"),
+        ("RCSS", "-1004469237763"),
+    ],
 )
 def test_new_airport_trading_telegram_routing(monkeypatch, airport, chat_id):
     paper_job = _load_paper_job_module()

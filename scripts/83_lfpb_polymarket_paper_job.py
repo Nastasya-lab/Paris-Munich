@@ -72,6 +72,14 @@ AIRPORT_SPECS = {
         "metar_path": "data/forecasts/awc_metar_live_LIMC.parquet",
         "station_markers": ("limc", "milan", "malpensa"),
     },
+    "RCSS": {
+        "city_name": "Taipei",
+        "timezone": "Asia/Taipei",
+        "env_prefix": "RCSS",
+        "report_path": "data/reports/latest_rcss_prediction.json",
+        "metar_path": "data/forecasts/awc_metar_live_RCSS.parquet",
+        "station_markers": ("rcss", "taipei", "songshan"),
+    },
 }
 
 
@@ -317,6 +325,9 @@ def _activate_airport_telegram(airport: str) -> None:
     elif airport == "LIMC":
         token = token or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
         chat_id = chat_id or "-1004371899833"
+    elif airport == "RCSS":
+        token = token or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN_LFPB")
+        chat_id = chat_id or "-1004469237763"
     if token:
         os.environ["TELEGRAM_BOT_TOKEN"] = token
     if chat_id:
